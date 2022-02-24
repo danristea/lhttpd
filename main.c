@@ -20,8 +20,6 @@ sig_sigaction(int signo, siginfo_t *info, void* ctx)
 		struct server *srv = thr->srv;
 		u_int64_t eval = 1;
 
-    fprintf(stderr, "\n\n222GGGGGOGGOGOGOGOGOGGOGOGOGOOOOOOOOOOOOOOO\n\n\n");
-	//	assert(write(thr->pfd[1], "a", 1) == 1);
 		assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
 }
 
