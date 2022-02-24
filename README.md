@@ -36,4 +36,5 @@ local function foo(env, header)
       httpd.write(nil, n.." "..v.."\n")
     end
 end
+
 httpd.register_handler('bar', foo)
