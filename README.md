@@ -36,8 +36,8 @@ The following API functions are provided:
 To be able to invoke functions within a lua script via HTTP requests, the following steps need to be present:
 
 - a prefix name must be associated with a lua script name as a parameter during server startup (eg. -l prefix script.lua)
-- httpd = require 'httpd' - this line must be present inside the lua script; it loads the custom lua library API functions described below API functions:
-- httpd.register_handler('bar', foo) -> this register the function foo as a handler "bar" executed when URI matches "/name/bar"
+- httpd = require 'httpd' - this line must be present inside the lua script; it loads the custom lua library API functions described below
+- httpd.register_handler('bar', foo) - this register the function foo as a handler "bar" executed when URI matches "/name/bar"
 - local function foo(env, header) needs to be present with 2 tables (env and header) as function arguments that contain environent and request information
 
 A minimal example: 
@@ -58,7 +58,7 @@ A minimal example:
 
     httpd.register_handler("/bar", foo)
     
- More examples can be found in the "examples" folder, which include upload, HTTP/2 server push, and more.
+ Additional examples can be found in the "examples" folder, which include upload, HTTP/2 server push, and more.
  
  ## Build Requirements:
  lhttpd is compiled using [lua](https://www.lua.org) or [luajit](https://luajit.org/), [bearssl](https://bearssl.org/) and [hpack](https://github.com/reyk/hpack).
