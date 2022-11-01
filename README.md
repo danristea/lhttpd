@@ -6,7 +6,7 @@
 
 ## Architectural Notes
 
-The server component is designed to run on multiple pthreads in a nonblocking and lockless (no mutex) fashion. It achieves this by interlacing the OS event system (kqueue, epoll) with lua coroutines via its custom API functions. States are kept thread specific with the server socket armed with one-shot and re-armed by next thread’s syscall of batched events as applicable. Asynchronous I/O are also batched per syscall, as applicable. Memory management is kept to minimum on the server side, and stream (API) specific memory management needed for connection and AIO communication is hooked into Lua’s garbage collection.
+The server component is designed to run on multiple POSIX threads (pthreads) in a nonblocking and lockless (no mutex) fashion. It achieves this by interlacing the OS event system (kqueue, epoll) with lua coroutines via its custom API functions. States are kept thread specific with the server socket armed with one-shot and re-armed by next thread’s syscall of batched events as applicable. New connection memory allocation is pre-allocated per-thread when cycles permit, before a new connection event is ready. Asynchronous I/O requests are also batched per syscall, as applicable. Memory management is kept to minimum on the server side, and stream (API) specific memory management needed for connection and AIO communication is hooked into Lua’s garbage collection.
 
 ## API 
 
