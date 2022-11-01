@@ -19,7 +19,7 @@ To be able to invoke functions within a lua script via HTTP requests, the follow
 1) a prefix name must be associated with a lua script name as a parameter during server startup (eg. -l prefix script.lua)
 2) httpd = require 'httpd' - this line must be present inside the lua script; it loads the custom lua library API functions described below
 API functions:
-3) httpd.register_handler('bar', foo) -> this register the function foo as a handler "bar" executed when URI contains the "name/bar"
+3) httpd.register_handler('bar', foo) -> this register the function foo as a handler "bar" executed when URI matches "/name/bar"
 4) local function foo(env, header) needs to be present with 2 tables (env and header) as function arguments that contain environent and request information
 
 
