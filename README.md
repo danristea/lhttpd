@@ -30,8 +30,8 @@ The following API functions are provided:
 
     httpd.register_handler("/name", function) - functions that registers a handler name (must start with "/") with a coresponding lua function
     httpd.header(lua_table) - function that takes a lua table with response header key/value pairs which are converted into HTTP headers and sent over to the client
-    httpd.read(FILE*, length) - function that takes a FILE* or nil (if reading directly from the connection via client POST) and the length of how much. it returns a string, or nil if EOF 
-    httpd.write(FILE*, string) - function that takes a FILE* or nil (if writing directly to the connection) and the string to be written.
+    httpd.read(stream, length) - function that takes a lua stream (result of io.open/io.popen) or nil (if reading directly from the connection via client POST) and the length of how much. it returns a string, or nil if EOF 
+    httpd.write(stream, string) - function that takes a lua stream (result of io.open/io.popen) or nil (if writing directly to the connection) and the string to be written.
 
 To be able to invoke functions within a lua script via HTTP requests, the following steps need to be present:
 
