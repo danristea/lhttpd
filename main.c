@@ -36,9 +36,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 static void
 sig_sigaction(int signo, siginfo_t *info, void* ctx)
 {
-	struct thread *thr = (struct thread *) info->si_value.sival_ptr;
-	struct server *srv = thr->srv;
-	uint64_t eval = 1;
+    struct thread *thr = (struct thread *) info->si_value.sival_ptr;
+    struct server *srv = thr->srv;
+    uint64_t eval = 1;
 
 	assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
 }
@@ -118,43 +118,43 @@ init(struct server *srv, config *cfg)
 	if ((rv = getaddrinfo(cfg->addr, "443", &h, &si)) != 0)
 	    log_ex(srv, 1, "call to getaddrinfo failed (%s)", gai_strerror(rv));
 
-		for (ai = si; ai != NULL; ai = ai->ai_next) {
+	for (ai = si; ai != NULL; ai = ai->ai_next) {
 
-		    if ((srv->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) <= -1) {
-				log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
-				continue;
-			}
-
-			if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
-				log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
-
-			if (fcntl(srv->fd, F_SETFL, fcntl(srv->fd, F_GETFL, 0) | O_NONBLOCK) < 0)
-				log_ex(srv, 1, "cannot set non-blocking mode on server socket");
-
-			if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
-				close(srv->fd);
-				log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
-				continue;
-			}
-			break;
+		if ((srv->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) <= -1) {
+			log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
+			continue;
 		}
-		// free the server info addr struct
-		freeaddrinfo(si);
+
+		if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
+			log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
+
+		if (fcntl(srv->fd, F_SETFL, fcntl(srv->fd, F_GETFL, 0) | O_NONBLOCK) < 0)
+			log_ex(srv, 1, "cannot set non-blocking mode on server socket");
+
+		if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
+			close(srv->fd);
+			log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
+			continue;
+		}
+		break;
+	}
+	// free the server info addr struct
+	freeaddrinfo(si);
 
     if (listen(srv->fd, SOMAXCONN) < 0)
         log_ex(srv, 1, "cannot listen on PF_INET6 socket - %s", strerror(errno));
 
-		// read cert now if specified, before we chroot
-		if (cfg->cert_file) {
-				srv->cert = read_certificates(cfg->cert_file, &srv->cert_len);
-				if (srv->cert == NULL || srv->cert_len == 0)
-						log_ex(srv, 1, "certificate loading failed - %s", strerror(errno));
-				srv->pkey = read_private_key(cfg->pkey_file);
-				if (srv->pkey == NULL)
-						log_ex(srv, 1, "private key loading failed - %s", strerror(errno));
-		}
+	// read cert now if specified, before we chroot
+	if (cfg->cert_file) {
+		srv->cert = read_certificates(cfg->cert_file, &srv->cert_len);
+		if (srv->cert == NULL || srv->cert_len == 0)
+			log_ex(srv, 1, "certificate loading failed - %s", strerror(errno));
+		srv->pkey = read_private_key(cfg->pkey_file);
+		if (srv->pkey == NULL)
+			log_ex(srv, 1, "private key loading failed - %s", strerror(errno));
+	}
 
-		// chroot to folder if specified
+	// chroot to folder if specified
     if (cfg->rootdir) {
         if (chdir(cfg->rootdir) < 0)
             log_ex(srv, 1, "chdir(%s) - %s", cfg->rootdir, strerror(errno));
@@ -162,7 +162,7 @@ init(struct server *srv, config *cfg)
             log_ex(srv, 0, "chroot(%s) - %s", cfg->rootdir, strerror(errno));
     }
 
-		// drop privs to the runas user if specified
+	// drop privs to the runas user if specified
     if (cfg->user) {
         if ((pw = getpwnam(cfg->user)) == NULL)
             log_ex(srv, 1, "getpwnam - %s", strerror(errno));
