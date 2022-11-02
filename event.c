@@ -1,3 +1,31 @@
+/*
+BSD 2-Clause License
+
+Copyright (c) 2022, danristea
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <signal.h>
 
 #include "event.h"
@@ -6,18 +34,12 @@ extern void get_monotonic_time(struct timespec *ts);
 static long ts_to_tv(struct timespec *ts);
 struct timespec tv_to_ts(unsigned long tv);
 
-// function that checks if fd is valid
-int
-fd_is_valid(int fd)
-{
-    return fcntl(fd, F_GETFD) != -1 || errno != EBADF;
-}
 
 // kqueue (bsd) specific event system code
 #ifdef HAVE_SYS_EVENT_H
 #include <sys/event.h>
 
-static int ev_map[] = {EVFILT_SIGNAL, EVFILT_READ, EVFILT_WRITE};
+static int ev_map[] = {0, EVFILT_READ, EVFILT_WRITE};
 
 struct equeue *
 equeue_init()
@@ -75,7 +97,7 @@ equeue_del(struct equeue *eq, struct edata *ev, int fd, short filter)
     ke = (struct kevent*) eq->celist;
 
     // cleanup event struct not to pass garbage to kernel space
-    memset(ke + eq->ec, 0, sizeof(ke));
+    memset(ke + eq->ce, 0, sizeof(ke));
 
     EV_SET(ke + eq->ce, fd, ev_map[filter], EV_DELETE, 0, 0, ev);
 
@@ -113,10 +135,11 @@ equeue_poll(struct equeue *eq, int tv)
 
         ev = elist[i].udata;
 
-        // currently not in use in favour of the self pipe trick
-        if (elist[i].filter == EVFILT_SIGNAL) {
-            ev->cb[EV_SIGNAL](ev);
-            continue;
+        if ((elist[i].filter == EVFILT_WRITE) && (ev->filter & EV_WRITE)) {
+            if (elist[i].flags & EV_ONESHOT)
+                ev->filter ^= EV_WRITE;
+
+            ev->cb[EV_WRITE](ev);
         }
 
         if ((elist[i].filter == EVFILT_READ) && (ev->filter & EV_READ)) {
@@ -125,17 +148,10 @@ equeue_poll(struct equeue *eq, int tv)
 
             ev->cb[EV_READ](ev);
         }
-        if ((elist[i].filter == EVFILT_WRITE) && (ev->filter & EV_WRITE)) {
-            if (elist[i].flags & EV_ONESHOT)
-                ev->filter ^= EV_WRITE;
-
-            ev->cb[EV_WRITE](ev);
-        }
     }
 }
 
 // epoll linux specific event system code
-///////////////////////////////////////////////////////////////////////////////////////
 #elif HAVE_SYS_EPOLL_H
 #include <sys/epoll.h>
 
@@ -168,7 +184,6 @@ equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, 
     struct epoll_event ee;
     int rv;
 
-    //if (ev->filter & filter) {
     if ((ev->filter & filter) && (once == 0)) {
         return;
     }
@@ -182,22 +197,20 @@ equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, 
          ee.events = ev_map[ev->filter];
          ee.events |= ev_map[filter];
 
-         if (once == 1) {
+         if (once == 1)
              ee.events |= EPOLLONESHOT | EPOLLET;
-             ee.events |= EPOLLET;
-          }
 
          rv = epoll_ctl(eq->fd, EPOLL_CTL_MOD, fd, &ee);
     } else {
         ee.events = ev_map[filter];
 
-        if (once == 1) {
+        if (once == 1)
           ee.events |= EPOLLONESHOT | EPOLLET;
-          ee.events |= EPOLLET;
-        }
 
         rv = epoll_ctl(eq->fd, EPOLL_CTL_ADD, fd, &ee);
     }
+
+    assert(rv == 0);
 
     ev->filter |= filter;
     ev->ctx = ctx;
@@ -224,7 +237,6 @@ equeue_del(struct equeue *eq, struct edata *ev, int fd, short filter)
 
     assert(rv == 0);
 
-    //ev->filter ^= filter;
     eq->ce--;
 }
 
@@ -247,22 +259,14 @@ equeue_poll(struct equeue *eq, int tv)
     eq->tv = ts_to_tv(&ts);
 
     for (int i = 0; i < rv; i++) {
+
         ev = elist[i].data.ptr;
 
-        if (((elist[i].events & EPOLLIN) || (elist[i].events & EPOLLHUP)) && (ev->filter & EV_READ)) {
-              if (elist[i].events & EPOLLONESHOT) {
-                  //ev->filter ^= EV_READ;
-              }
-              ev->cb[EV_READ](ev);
-        }
+        if (((elist[i].events & EPOLLOUT) || (elist[i].events & EPOLLHUP)) && (ev->filter & EV_WRITE))
+            ev->cb[EV_WRITE](ev);
 
-        if (((elist[i].events & EPOLLOUT) || (elist[i].events & EPOLLHUP)) && (ev->filter & EV_WRITE)) {
-              if (elist[i].events & EPOLLONESHOT) {
-                  //ev->filter ^= EV_WRITE;
-              }
-
-              ev->cb[EV_WRITE](ev);
-        }
+        if (((elist[i].events & EPOLLIN) || (elist[i].events & EPOLLHUP)) && (ev->filter & EV_READ))
+            ev->cb[EV_READ](ev);
     }
 }
 
