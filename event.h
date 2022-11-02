@@ -14,10 +14,8 @@
 
 
 // some system globals
-#define NCPU 8 //NCPU (sysconf(_SC_NPROCESSORS_ONLN))
+#define NCPU 3  (sysconf(_SC_NPROCESSORS_ONLN))
 #define MAX_KEV ((sysconf(_SC_OPEN_MAX)) * 2)
-//#define MAX_AIO (sysconf(_SC_AIO_MAX))
-//#define MAX_LISTIO (sysconf(_SC_AIO_LISTIO_MAX))
 
 enum EV_FILTER {EV_SIGNAL = (0), EV_READ = (1) , EV_WRITE = (2)};
 
@@ -48,7 +46,5 @@ void equeue_poll(struct equeue* eq, int tv);
 #define EQ_ADD(eq, ev, fd, filter, cb, ctx, once) equeue_add(eq, ev, fd, filter, cb, ctx, once)
 #define EQ_DEL(eq, ev, fd, filter) equeue_del(eq, ev, fd, filter)
 #define EQ_POLL(eq, tv) equeue_poll(eq, tv)
-
-int fd_is_valid(int);
 
 #endif
