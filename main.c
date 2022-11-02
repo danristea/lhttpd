@@ -124,7 +124,7 @@ init(struct server *srv, config *cfg)
 				log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
 				continue;
 			}
-			
+
 			if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
 				log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
 
