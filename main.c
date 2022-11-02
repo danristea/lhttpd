@@ -1,3 +1,31 @@
+/*
+BSD 2-Clause License
+
+Copyright (c) 2022, danristea
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #include <pwd.h>
 #include <signal.h>
 #include <pthread.h>
@@ -6,19 +34,11 @@
 #include "httpd.h"
 
 static void
-sigchild(int signo)
-{
-	  while (waitpid(-1, NULL, WNOHANG) > 0) {
-			  log_dbg(3, "waiting on child, signo: %i pidno: %i parent pidno: ", signo, getpid(), getppid());
-		}
-}
-
-static void
 sig_sigaction(int signo, siginfo_t *info, void* ctx)
 {
 		struct thread *thr = (struct thread *) info->si_value.sival_ptr;
 		struct server *srv = thr->srv;
-		u_int64_t eval = 1;
+		uint64_t eval = 1;
 
 		assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
 }
@@ -59,7 +79,7 @@ init(struct server *srv, config *cfg)
 		sigact.sa_handler = SIG_IGN;
 		sigact.sa_flags = SA_RESTART;
 
-		sigaction(SIGHUP, &sigact, NULL);
+//	sigaction(SIGHUP, &sigact, NULL);
 		sigaction(SIGPIPE, &sigact, NULL); // LEAVE THIS ON!!
 
 		// catch SIGIO to signal AIO completion
@@ -84,9 +104,14 @@ init(struct server *srv, config *cfg)
 
         }
 
-				close(STDIN_FILENO);
-				close(STDOUT_FILENO);
-				close(STDERR_FILENO);
+				//close(STDIN_FILENO);
+				//close(STDOUT_FILENO);
+				//close(STDERR_FILENO);
+
+				memset(&sigact, 0, sizeof sigact);
+				sigact.sa_handler = SIG_IGN;
+				sigact.sa_flags = SA_RESTART;
+				sigaction(SIGINT, &sigact, NULL);
     }
 
 		memset(&h, 0, sizeof h);
@@ -112,7 +137,7 @@ init(struct server *srv, config *cfg)
 						log_ex(srv, 1, "cannot set non-blocking mode on server socket");
 
 				if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
-						//close(srv->fd);
+						close(srv->fd);
 						log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
 						continue;
 				}
@@ -155,7 +180,11 @@ init(struct server *srv, config *cfg)
     }
 
 		// initialize logging
-    log_init(srv->progname, cfg->debug, cfg->fg);
+		log_init(srv->progname, cfg->debug, cfg->fg);
+
+		// initialize hpack
+		if (hpack_init() != 0)
+		    log_ex(srv, 1, "hpack init failure");
 
 	  // initilize pthreads
     if ((srv->thr = calloc(NCPU, sizeof (struct thread))) == NULL)
@@ -164,10 +193,9 @@ init(struct server *srv, config *cfg)
     for (short i = 0; i < NCPU; i++) {
 
 			  srv->thr[i].srv = srv;
-			  srv->thr[i].conn_head = NULL;
-			  srv->thr[i].conn_tail = NULL;
 
 				SIMPLEQ_INIT(&srv->thr[i].L_map);
+				TAILQ_INIT(&srv->thr[i].conn_t);
 
 				if((new_conn(&srv->thr[i])) < 0)
 		        log_ex(srv, 1, "error preallocating connection - %s", strerror(errno));
@@ -177,21 +205,21 @@ init(struct server *srv, config *cfg)
 						log_ex(srv, 1, "error creating event queue - %s", strerror(errno));
 
 				if (lua_map_create(&srv->thr[i], &cfg->l_map) < 0)
-						log_ex(srv, 1, "error creating Lua map from script - %s", strerror(errno));
+						log_ex(srv, 1, "error creating Lua map from script");
 
 				// add the server socket to the first thread's event queue
 				if (i == 0)
 				    EQ_ADD(srv->thr[i].eq, &srv->thr[i].ev[0], srv->fd, EV_READ, conntab_create, &srv->thr[i], ((NCPU == 1) ? 0: 1));
 
-				// create a pipe and add it to the event queue for inter thread communication
+				// create a pipe and add it to the event queue for inter thread communication (self pipe trick)
 				if (pipe(srv->thr[i].pfd) < 0)
 						log_ex(srv, 1, "pipe - %s", strerror(errno));
 
 				// make both ends of the pipe non-blocking
-				if (fcntl(srv->fd, F_SETFL, fcntl(srv->thr[i].pfd[0], F_GETFL, 0) | O_NONBLOCK) < 0)
+				if (fcntl(srv->thr[i].pfd[0], F_SETFL, fcntl(srv->thr[i].pfd[0], F_GETFL, 0) | O_NONBLOCK) < 0)
 						log_ex(srv, 1, "cannot set non-blocking mode on pipe read fd");
 
-				if (fcntl(srv->fd, F_SETFL, fcntl(srv->thr[i].pfd[1], F_GETFL, 0) | O_NONBLOCK) < 0)
+				if (fcntl(srv->thr[i].pfd[1], F_SETFL, fcntl(srv->thr[i].pfd[1], F_GETFL, 0) | O_NONBLOCK) < 0)
 					  log_ex(srv, 1, "cannot set non-blocking mode on pipe write fd");
 
 				// initialize async io
@@ -243,6 +271,10 @@ main(int argc, char **argv)
         else if (strcmp(argv[i], "-f") == 0)
             cfg->fg = 1;
         else if (strcmp(argv[i], "-l") == 0 && i + 2 < argc) {
+
+					  if (*argv[i + 1] != '/')
+							  log_ex(srv, 1, "%s error: lua perfix path must start with /", srv->progname);
+
 						lua_map *lm = malloc(sizeof(lua_map));
 
 						lm->prefix = e_strdup(argv[++i]);
@@ -262,7 +294,7 @@ main(int argc, char **argv)
 		    if (pthread_join(srv->thr[i].tid, NULL) != 0)
 				    log_ex(srv, 1, "pthread_join - %s", strerror(errno));
 
-		/* TODO: cleanup, free, etc */
+		/* TODO: cleanup, free, etc. */
 
     /* NOT REACHED */
     return (0);
