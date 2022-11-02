@@ -36,11 +36,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 static void
 sig_sigaction(int signo, siginfo_t *info, void* ctx)
 {
-		struct thread *thr = (struct thread *) info->si_value.sival_ptr;
-		struct server *srv = thr->srv;
-		uint64_t eval = 1;
+	struct thread *thr = (struct thread *) info->si_value.sival_ptr;
+	struct server *srv = thr->srv;
+	uint64_t eval = 1;
 
-		assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
+	assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
 }
 
 static void
@@ -48,47 +48,47 @@ usage(struct server *srv)
 {
     log_ex(NULL, 5, "usage: %s [-l lua prefix, lua script] [-c certifiate] [-k private key] [options]", srv->progname);
     log_ex(NULL, 5, "options:");
-		log_ex(NULL, 5, "-l Lua prefix, Lua Script");
+	log_ex(NULL, 5, "-l Lua prefix, Lua Script");
     log_ex(NULL, 5, "-u user");
     log_ex(NULL, 5, "-a address");
     log_ex(NULL, 5, "-p port");
     log_ex(NULL, 5, "-r rootdir");
-		log_ex(NULL, 5, "-d (enable debuging)");
-		log_ex(NULL, 5, "-f (foreground mode)");
+	log_ex(NULL, 5, "-d (enable debuging)");
+	log_ex(NULL, 5, "-f (foreground mode)");
     log_ex(srv, 1, "%s failed to start", srv->progname);
 }
 
 void
 init(struct server *srv, config *cfg)
 {
-		struct thread thr;
+	struct thread thr;
     struct sigaction sigact;
-		sigset_t set;
+	sigset_t set;
     struct passwd *pw;
     char addr[INET6_ADDRSTRLEN] = {'\0'};
-		struct addrinfo h, *ai, *si;
+	struct addrinfo h, *ai, *si;
     char buffer;
     int optval = 1;
-		int rv;
+	int rv;
 
-		srv->conf = cfg;
-		srv->timeout = 70;
+	srv->conf = cfg;
+	srv->timeout = 70;
 
-		// ignore broken pipe and hangup signals
-		memset(&sigact, 0, sizeof sigact);
-		sigact.sa_handler = SIG_IGN;
-		sigact.sa_flags = SA_RESTART;
+	// ignore broken pipe and hangup signals
+	memset(&sigact, 0, sizeof sigact);
+	sigact.sa_handler = SIG_IGN;
+	sigact.sa_flags = SA_RESTART;
 
-//	sigaction(SIGHUP, &sigact, NULL);
-		sigaction(SIGPIPE, &sigact, NULL); // LEAVE THIS ON!!
+	//	sigaction(SIGHUP, &sigact, NULL);
+	sigaction(SIGPIPE, &sigact, NULL);
 
-		// catch SIGIO to signal AIO completion
-		memset(&sigact, 0, sizeof sigact);
-		sigemptyset(&sigact.sa_mask);
-		sigact.sa_flags = SA_SIGINFO;
-		//sig_act.sa_flags = SA_RESTART | SA_SIGINFO;
-		sigact.sa_sigaction = sig_sigaction;
-		sigaction(SIGIO, &sigact, NULL);
+	// catch SIGIO to signal AIO completion
+	memset(&sigact, 0, sizeof sigact);
+	sigemptyset(&sigact.sa_mask);
+	sigact.sa_flags = SA_SIGINFO;
+	//sig_act.sa_flags = SA_RESTART | SA_SIGINFO;
+	sigact.sa_sigaction = sig_sigaction;
+	sigaction(SIGIO, &sigact, NULL);
 
     if (!cfg->fg) {
 
@@ -103,45 +103,40 @@ init(struct server *srv, config *cfg)
                 exit(1);
 
         }
-
-				//close(STDIN_FILENO);
-				//close(STDOUT_FILENO);
-				//close(STDERR_FILENO);
-
-				memset(&sigact, 0, sizeof sigact);
-				sigact.sa_handler = SIG_IGN;
-				sigact.sa_flags = SA_RESTART;
-				sigaction(SIGINT, &sigact, NULL);
+		memset(&sigact, 0, sizeof sigact);
+		sigact.sa_handler = SIG_IGN;
+		sigact.sa_flags = SA_RESTART;
+	    sigaction(SIGINT, &sigact, NULL);
     }
 
-		memset(&h, 0, sizeof h);
+	memset(&h, 0, sizeof h);
 
-		h.ai_family = AF_UNSPEC; // use IPv4 or IPv6, whichever
-		h.ai_flags = AI_PASSIVE; // use my IP
-		h.ai_socktype = SOCK_STREAM;
+	h.ai_family = AF_UNSPEC; // use IPv4 or IPv6, whichever
+	h.ai_flags = AI_PASSIVE; // use my IP
+	h.ai_socktype = SOCK_STREAM;
 
-		if ((rv = getaddrinfo(cfg->addr, "443", &h, &si)) != 0)
-				 log_ex(srv, 1, "call to getaddrinfo failed (%s)", gai_strerror(rv));
+	if ((rv = getaddrinfo(cfg->addr, "443", &h, &si)) != 0)
+	    log_ex(srv, 1, "call to getaddrinfo failed (%s)", gai_strerror(rv));
 
 		for (ai = si; ai != NULL; ai = ai->ai_next) {
 
-				if ((srv->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) <= -1) {
-						log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
-						continue;
-				}
+		    if ((srv->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) <= -1) {
+				log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
+				continue;
+			}
+			
+			if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
+				log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
 
-				if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
-						log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
+			if (fcntl(srv->fd, F_SETFL, fcntl(srv->fd, F_GETFL, 0) | O_NONBLOCK) < 0)
+				log_ex(srv, 1, "cannot set non-blocking mode on server socket");
 
-				if (fcntl(srv->fd, F_SETFL, fcntl(srv->fd, F_GETFL, 0) | O_NONBLOCK) < 0)
-						log_ex(srv, 1, "cannot set non-blocking mode on server socket");
-
-				if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
-						close(srv->fd);
-						log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
-						continue;
-				}
-				break;
+			if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
+				close(srv->fd);
+				log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
+				continue;
+			}
+			break;
 		}
 		// free the server info addr struct
 		freeaddrinfo(si);
@@ -179,59 +174,59 @@ init(struct server *srv, config *cfg)
             log_ex(srv, 1, "setuid - %s",  strerror(errno));
     }
 
-		// initialize logging
-		log_init(srv->progname, cfg->debug, cfg->fg);
+	// initialize logging
+	log_init(srv->progname, cfg->debug, cfg->fg);
 
-		// initialize hpack
-		if (hpack_init() != 0)
-		    log_ex(srv, 1, "hpack init failure");
+	// initialize hpack
+	if (hpack_init() != 0)
+        log_ex(srv, 1, "hpack init failure");
 
-	  // initilize pthreads
+	// initilize pthreads
     if ((srv->thr = calloc(NCPU, sizeof (struct thread))) == NULL)
         log_ex(srv, 1, "calloc thread - %s", strerror(errno));
 
     for (short i = 0; i < NCPU; i++) {
 
-			  srv->thr[i].srv = srv;
+		srv->thr[i].srv = srv;
 
-				SIMPLEQ_INIT(&srv->thr[i].L_map);
-				TAILQ_INIT(&srv->thr[i].conn_t);
+		SIMPLEQ_INIT(&srv->thr[i].L_map);
+		TAILQ_INIT(&srv->thr[i].conn_t);
 
-				if((new_conn(&srv->thr[i])) < 0)
-		        log_ex(srv, 1, "error preallocating connection - %s", strerror(errno));
+		if((new_conn(&srv->thr[i])) < 0)
+		log_ex(srv, 1, "error preallocating connection - %s", strerror(errno));
 
-				log_dbg(5, "->> thread %i equeue\n", i);
-				if ((srv->thr[i].eq = EQ_INIT()) == NULL)
-						log_ex(srv, 1, "error creating event queue - %s", strerror(errno));
+		log_dbg(5, "->> thread %i equeue\n", i);
+		if ((srv->thr[i].eq = EQ_INIT()) == NULL)
+			log_ex(srv, 1, "error creating event queue - %s", strerror(errno));
 
-				if (lua_map_create(&srv->thr[i], &cfg->l_map) < 0)
-						log_ex(srv, 1, "error creating Lua map from script");
+		if (lua_map_create(&srv->thr[i], &cfg->l_map) < 0)
+			log_ex(srv, 1, "error creating Lua map from script");
 
-				// add the server socket to the first thread's event queue
-				if (i == 0)
-				    EQ_ADD(srv->thr[i].eq, &srv->thr[i].ev[0], srv->fd, EV_READ, conntab_create, &srv->thr[i], ((NCPU == 1) ? 0: 1));
+		// add the server socket to the first thread's event queue
+		if (i == 0)
+		    EQ_ADD(srv->thr[i].eq, &srv->thr[i].ev[0], srv->fd, EV_READ, conntab_create, &srv->thr[i], ((NCPU == 1) ? 0: 1));
 
-				// create a pipe and add it to the event queue for inter thread communication (self pipe trick)
-				if (pipe(srv->thr[i].pfd) < 0)
-						log_ex(srv, 1, "pipe - %s", strerror(errno));
+		// create a pipe and add it to the event queue for inter thread communication (self pipe trick)
+		if (pipe(srv->thr[i].pfd) < 0)
+		    log_ex(srv, 1, "pipe - %s", strerror(errno));
 
-				// make both ends of the pipe non-blocking
-				if (fcntl(srv->thr[i].pfd[0], F_SETFL, fcntl(srv->thr[i].pfd[0], F_GETFL, 0) | O_NONBLOCK) < 0)
-						log_ex(srv, 1, "cannot set non-blocking mode on pipe read fd");
+		// make both ends of the pipe non-blocking
+		if (fcntl(srv->thr[i].pfd[0], F_SETFL, fcntl(srv->thr[i].pfd[0], F_GETFL, 0) | O_NONBLOCK) < 0)
+		    log_ex(srv, 1, "cannot set non-blocking mode on pipe read fd");
 
-				if (fcntl(srv->thr[i].pfd[1], F_SETFL, fcntl(srv->thr[i].pfd[1], F_GETFL, 0) | O_NONBLOCK) < 0)
-					  log_ex(srv, 1, "cannot set non-blocking mode on pipe write fd");
+		if (fcntl(srv->thr[i].pfd[1], F_SETFL, fcntl(srv->thr[i].pfd[1], F_GETFL, 0) | O_NONBLOCK) < 0)
+			log_ex(srv, 1, "cannot set non-blocking mode on pipe write fd");
 
-				// initialize async io
-				if ((srv->thr[i].aio = AIO_INIT(srv->thr[i].pfd)) == NULL)
-				    log_ex(srv, 1, "error creating event queue - %s", strerror(errno));
+		// initialize async io
+		if ((srv->thr[i].aio = AIO_INIT(srv->thr[i].pfd)) == NULL)
+		    log_ex(srv, 1, "error creating event queue - %s", strerror(errno));
 
-				// add the pipe to the event queue
-				EQ_ADD(srv->thr[i].eq, &srv->thr[i].ev[1], srv->thr[i].pfd[0], EV_READ, thread_wakeup, &srv->thr[i], 0);
+		// add the pipe to the event queue
+		EQ_ADD(srv->thr[i].eq, &srv->thr[i].ev[1], srv->thr[i].pfd[0], EV_READ, thread_wakeup, &srv->thr[i], 0);
 
         if (pthread_create(&srv->thr[i].tid, NULL, serve, &srv->thr[i]))
             log_ex(srv, 1, "pthread_create - %s", strerror(errno));
-    }
+     }
 }
 
 /* main */
@@ -242,19 +237,19 @@ main(int argc, char **argv)
     struct config *cfg;
     int i;
 
-		if (!((srv = calloc(1, sizeof(struct server))) && (cfg = calloc(1, sizeof(config)))))
-			  log_ex(srv, 0, "error: memory allocation failure");
+	if (!((srv = calloc(1, sizeof(struct server))) && (cfg = calloc(1, sizeof(config)))))
+	    log_ex(srv, 0, "error: memory allocation failure");
 
-		if ((srv->progname = strrchr(argv[0], '/')) == NULL)
-		    srv->progname = e_strdup(argv[0]);
-		else
-		    srv->progname++;
+	if ((srv->progname = strrchr(argv[0], '/')) == NULL)
+		srv->progname = e_strdup(argv[0]);
+	else
+		srv->progname++;
 
-		cfg->addr = NULL;
-		SIMPLEQ_INIT(&cfg->l_map);
+	cfg->addr = NULL;
+	SIMPLEQ_INIT(&cfg->l_map);
 
     for (i = 1; i < argc; i++) {
-			  if (strcmp(argv[i], "-u") == 0 && i + 1 < argc)
+	    if (strcmp(argv[i], "-u") == 0 && i + 1 < argc)
             cfg->user = e_strdup(argv[++i]);
         else if (strcmp(argv[i], "-r") == 0 && i + 1 < argc)
             cfg->rootdir = e_strdup(argv[++i]);
@@ -262,26 +257,26 @@ main(int argc, char **argv)
             cfg->addr = e_strdup(argv[++i]);
         else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc)
             cfg->port = e_strdup(argv[++i]);
-				else if (strcmp(argv[i], "-c") == 0)
-						cfg->cert_file = e_strdup(argv[++i]);
-				else if (strcmp(argv[i], "-k") == 0)
-						cfg->pkey_file = e_strdup(argv[++i]);
+		else if (strcmp(argv[i], "-c") == 0)
+			cfg->cert_file = e_strdup(argv[++i]);
+		else if (strcmp(argv[i], "-k") == 0)
+			cfg->pkey_file = e_strdup(argv[++i]);
         else if (strcmp(argv[i], "-d") == 0 && i + 1 < argc)
             cfg->debug = (int) strtol(argv[++i], (char **)NULL, 10);
         else if (strcmp(argv[i], "-f") == 0)
             cfg->fg = 1;
         else if (strcmp(argv[i], "-l") == 0 && i + 2 < argc) {
 
-					  if (*argv[i + 1] != '/')
-							  log_ex(srv, 1, "%s error: lua perfix path must start with /", srv->progname);
+			if (*argv[i + 1] != '/')
+		    	log_ex(srv, 1, "%s error: lua perfix path must start with /", srv->progname);
 
-						lua_map *lm = malloc(sizeof(lua_map));
+			lua_map *lm = malloc(sizeof(lua_map));
 
-						lm->prefix = e_strdup(argv[++i]);
-						lm->script = e_strdup(argv[++i]);
-					  SIMPLEQ_INSERT_TAIL(&cfg->l_map, lm, next);
+			lm->prefix = e_strdup(argv[++i]);
+			lm->script = e_strdup(argv[++i]);
+			SIMPLEQ_INSERT_TAIL(&cfg->l_map, lm, next);
 
-				} else
+		} else
             usage(srv);
     };
 
@@ -290,9 +285,9 @@ main(int argc, char **argv)
 
     init(srv, cfg);
 
-		for (i = 0; i < NCPU; i++)
-		    if (pthread_join(srv->thr[i].tid, NULL) != 0)
-				    log_ex(srv, 1, "pthread_join - %s", strerror(errno));
+	for (i = 0; i < NCPU; i++)
+		if (pthread_join(srv->thr[i].tid, NULL) != 0)
+			log_ex(srv, 1, "pthread_join - %s", strerror(errno));
 
 		/* TODO: cleanup, free, etc. */
 
