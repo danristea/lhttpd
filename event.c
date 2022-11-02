@@ -179,7 +179,7 @@ equeue_init()
 }
 
 void
-equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, void* ctx, short once)
+equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, void *ctx, short once)
 {
     struct epoll_event ee;
     int rv;
@@ -278,10 +278,10 @@ static long
 ts_to_tv(struct timespec *ts)
 {
     return (long)ts->tv_sec * 1000000000L + ts->tv_nsec;
-};
+}
 
 struct timespec
 tv_to_ts(unsigned long tv)
 {
     return (struct timespec) {.tv_sec = tv / 1000, .tv_nsec = (tv % 1000) * 1000000};
-};
+}
