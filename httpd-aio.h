@@ -54,7 +54,6 @@ struct async_io {
     int ready;
     void *nlist;
     void *alist;
-    void *tlist[MAX_AIO];
 };
 
 struct async_io *aio_init(int pipe[2]);
