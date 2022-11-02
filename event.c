@@ -194,18 +194,18 @@ equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, 
     ee.data.ptr = ev;
 
     if ((ev->filter != 0) || ((ev->filter != 0) && (once == 1))) {
-         ee.events = ev_map[ev->filter];
-         ee.events |= ev_map[filter];
+        ee.events = ev_map[ev->filter];
+        ee.events |= ev_map[filter];
 
-         if (once == 1)
-             ee.events |= EPOLLONESHOT | EPOLLET;
+        if (once == 1)
+            ee.events |= EPOLLONESHOT | EPOLLET;
 
-         rv = epoll_ctl(eq->fd, EPOLL_CTL_MOD, fd, &ee);
+        rv = epoll_ctl(eq->fd, EPOLL_CTL_MOD, fd, &ee);
     } else {
         ee.events = ev_map[filter];
 
         if (once == 1)
-          ee.events |= EPOLLONESHOT | EPOLLET;
+            ee.events |= EPOLLONESHOT | EPOLLET;
 
         rv = epoll_ctl(eq->fd, EPOLL_CTL_ADD, fd, &ee);
     }
