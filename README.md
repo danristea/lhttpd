@@ -2,7 +2,7 @@
 
 ## Overview
 
-**lhttpd** is a secure multithreaded HTTP/1.x HTTP/2 webserver written in C designed to execute lua bytecode in a non-blocking fashion via its API functions. It uses [bearssl](https://bearssl.org/) for secure communication and AIO (in-kernel support) for asynchronous disk I/O. It supports both versions of lua and luajit, has been extensively tested on Linux and FreeBSD and is ideal for embedded environments.
+**lhttpd** is a secure multithreaded HTTP/1.x HTTP/2 webserver written in C designed to execute lua bytecode in a non-blocking fashion via its API functions. It uses [bearssl](https://bearssl.org/) for secure communication and AIO (in-kernel support) for asynchronous disk I/O. It supports both versions of lua and luajit, has been tested on Linux and FreeBSD and is ideal for embedded environments.
 
 ## Architectural Notes
 
