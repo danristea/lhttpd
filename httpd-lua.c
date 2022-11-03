@@ -1,3 +1,31 @@
+/*
+BSD 2-Clause License
+
+Copyright (c) 2022, danristea
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+*/
+
 #define _GNU_SOURCE
 
 #include <fcntl.h>
@@ -10,245 +38,246 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+
+static void
+lh_setenv(lua_State *L, const luaL_Reg *l, int nup)
+{
+    //lua_newtable(L);
+    lua_getfield(L, LUA_REGISTRYINDEX, "httpd.data");
+
+//    lua_createtable (L, 0, 1); /* its metatable, which is */
+//    lua_pushliteral (L, "__mode"); /* used to make environment */
+//    lua_pushliteral (L, "k"); /* weak in the keys */
+//    lua_rawset (L, -3); /* metatable.__mode = "k" */
+//    lua_setmetatable (L, -2);
+
+    luaL_checkstack(L, nup + 1, "too many upvalues");
+    for (; l->name != NULL; l++) {  /* fill the table with given functions */
+        int i;
+        lua_pushstring(L, l->name);
+        for (i = 0; i < nup; i++)  /* copy upvalues to the top */
+            lua_pushvalue(L, - (nup + 1));
+        lua_pushcclosure(L, l->func, nup);  /* closure with those upvalues */
+        lua_settable(L, - (nup + 3));
+    }
+    lua_pop(L, nup);  /* remove upvalues */
+}
+
+struct stream *
+lh_getstrm(lua_State *L)
+{
+    struct stream *strm;
+
+    lua_pushthread(L);
+    lua_rawget(L, LUA_REGISTRYINDEX);
+
+    strm = (struct stream *) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+
+    return strm;
+}
+
+static void
+lh_setupval(lua_State *L)
+{
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, -3);
+    lua_rawset(L, -3);
+    lua_pop(L, 1);
+}
+
+void*
+lh_getupval(lua_State *L)
+{
+    void* val;
+
+    lua_pushvalue(L, lua_upvalueindex(1));
+    lua_insert(L, -2);
+    lua_rawget(L, -2);
+    val = (void*) lua_touserdata(L, -1);
+    lua_pop(L, 2);
+
+    return val;
+}
+
 int
 lua_run(lua_State *T, lua_State *L, int n)
 {
 #if LUA_VERSION_NUM >= 504
-{
-	  int na;
-	  lua_resume(T, L, n, &na);
-}
+    int na;
+    lua_resume(T, L, n, &na);
 #else
     lua_resume(T, n);
 #endif
-} //f
+}
 
-
-long
-fsize(FILE *F)
+struct lua_handler *
+find_handler(struct lua_state_map* Lm, char* name, char* query)
 {
-    long pos, end;
+    struct lua_handler* lh;
+    int len;
 
-		pos = ftell(F);
-		if (pos < 0)
-		    return -1;
+    if (query)
+        len = query - name - 1;
+    else
+        len = strlen(name);
 
-    fseek(F, 0, SEEK_END);
-    end = ftell(F);
-    fseek(F, pos, SEEK_SET); //vrestore original position
+    // loop thourh handlers
+    SIMPLEQ_FOREACH(lh, &Lm->l_hand, next) {
+        if (strncmp(lh->name, name, len) || (len != strlen(lh->name)))
+            continue;
 
-    return end;
-} //f
+        return lh;
+    }
 
-struct lua_handler*
-find_handler(struct lua_state_map* Lm, char* name)
-{
-		struct lua_handler* lh;
-
-	  // loop thourh handlers
-	  SIMPLEQ_FOREACH(lh, &Lm->l_hand, next) {
-			  if (strcmp(lh->name, name))
-				    continue;
-
-				return lh;
-		}
-
-		return NULL;
-} //f
+    return NULL;
+}
 
 void
 strm_resume(struct stream *strm)
 {
-	  strm->ss ^= SS_WAIT;
+    struct connection *conn = strm->conn;
 
-	  // reset event counters
-	  strm->io_idx = 0;
-	  strm->io_len = 0;
+    log_dbg(5, "%s: strm %p", __func__, strm);
 
-	  // resume lua execution with the complete event data on the lua stack
-	  if ((strm->lua_status = lua_run(strm->T, strm->L, 1)) == 0)
-			  lthread_remove(strm->L, &strm->T);
+    // reset the stream state
+    strm->ss = IO_NONE;
 
-	  // check for new lua blocking before resuming connection
-	  if (!(strm->ss & SS_WAIT))
-			  return conn_resume(strm);
-} //f watch for lua_run int arg 1
+    // resume lua execution with the complete event data on the lua stack
+    if ((strm->lua_status = lua_run(strm->T, strm->L, lua_gettop(strm->T))) == 0)
+        strm->ss = IO_SEND;
 
-void
-lthread_remove(lua_State *L, lua_State **T)
-{
-		struct stream* strm;
-	  int i;
-
-		lua_pushlightuserdata(*T, *T);
-		lua_gettable(*T, LUA_REGISTRYINDEX);
-		strm = (struct stream*) lua_touserdata(*T, -1);
-
-		//lua_gc(*T, LUA_GCCOLLECT, 0);
-		//lua_gc(L, LUA_GCCOLLECT, 0);
-    //lua_gc(L, LUA_GCSTOP, 0);
-		//lua_setgcthreshold(L,0)
-
-		//reset_headers(strm);
-		//new_strm(strm->conn);
-		//reset_headers(strm);
-
-	  int top = lua_gettop(L);
-	  for (i = 1; i <= top; i++) {
-			  // find the lua thread to remove from the main lua state
-			  if (lua_tothread(L, i) == *T) {
-					  // remove everything from the thread stack so the gc can do its job
-						lua_settop(*T, 0);
-						//lua_close (*T);
-					  //stack_dump(*T, "FOR THE GC");
-					  stack_dump(L, "BEFORE thread POP");
-						log_dbg(5, "DELETING THREAD REFERENCE FOR GC TO DO ITS JOB");
-						//lua_gc(L, LUA_GCCOLLECT, 0); // keep this!!
-						lua_remove(L, i);
-						//fclose(*strm->f);
-
-						//lua_gc(L, LUA_GCCOLLECT, 0);
-						*T = NULL;
-
-						stack_dump(L, "AFTER thread POP");
-						//log_dbg(5, "HERE?");
-						return;
-				}
-		}
+    // check for new lua blocking before resuming connection
+    if (strm->ss != IO_NONE) {
+        conn->cs |= strm->ss;
+        return conn_io(conn);
+    }
 }
+
 
 // read data from recv buffer into lua
 // returns how much was read by lua
 int
-lev_read(struct stream* strm, char* buf, int len)
+lev_read(struct stream *strm, char *buf, int len)
 {
-	  struct connect* conn = strm->conn;
-	  lua_State* T = strm->T;
-		int idx = 0;
+    struct connection *conn = strm->conn;
+    lua_State *T = strm->T;
+    int idx = 0;
 
-		// repeat until lua reads all data from recv buffer
-		while (idx < len) {
+    log_dbg(5, "%s: strm %p buf %p len %i", __func__, strm, buf, len);
 
-				// check for blocking and return current idx as strm->io_len may have a new value
-				//if (strm->status == SS_WAIT)
-				//log_dbg(5, "gotta exit ss %i ", strm->ss);
-				//if (strm->fsio == 1)
-				if ((strm->ss != SS_RECV) || (strm->ss & SS_WAIT))
-				    break;
+    // repeat until lua reads all data from recv buffer
+    while (idx < len) {
 
-				// check if we have engough data in buffer
-				if ((len - idx) < strm->io_len)
-						break;
+        // check for blocking and return current idx as strm->io_len may have a new value
+        if (strm->ss != IO_RECV)
+            break;
 
-				// pass it to lua
-			  lua_pushlstring(T, &buf[idx], strm->io_len);
+        // check if we have engough data in buffer
+        if ((len - idx) < strm->io_len)
+            break;
 
-				// update index before strm->io_len may have a new value
-				idx += strm->io_len;
+        // pass it to lua
+        lua_pushlstring(T, &buf[idx], strm->io_len);
 
-				// resume lua execution with the value we passed
-				if ((strm->lua_status = lua_run(T, strm->L, 1)) != LUA_YIELD) {
-						lthread_remove(strm->L, &strm->T);
-					  break;
-				}
-		}
+        // update index before strm->io_len may have a new value
+        idx += strm->io_len;
 
-		// return index of how much we sent to lua
-		return idx;
+        // resume lua execution with the value we passed
+        if ((strm->lua_status = lua_run(T, strm->L, 1)) != LUA_YIELD) {
+            //strm->ss = IO_CLOSE;
+            break;
+        }
+    }
+
+    // flag the connection about app i/o activity
+    strm->conn->cs |= strm->ss;
+
+    // return index of how much we sent to lua
+    return idx;
 }
 
 // write lua data into the send buffer
 // returns how much was written to send buffer
 int
-lev_write(struct stream* strm, char* buf, int len)
+lev_write(struct stream *strm, char *buf, int len)
 {
-	  struct connect* conn = strm->conn;
-	  lua_State* T = strm->T;
-		int w_len;
-		int idx = 0;
+    struct connection *conn = strm->conn;
+    lua_State *T = strm->T;
+    int w_len;
+    int idx = 0;
 
-		// repeat until send buffer has space left
-		while (idx < len) {
-						//log_dbg(5, "strm is: %p", strm);
-			  // check for blocking and return current idx as strm->io_len may have a new value
-				//if (strm->status == SS_WAIT)
-				//if (strm->fsio == 1)
-				if ((strm->ss != SS_SEND) || (strm->ss & SS_WAIT))
-						break;
+    log_dbg(5, "%s: strm %p buf %p len %i", __func__, strm, buf, len);
 
-				w_len = MIN((len - idx), (strm->io_len - strm->io_idx));
+    // repeat until send buffer has space left
+    while (idx < len) {
 
-				memcpy(buf + idx, strm->io_buf + strm->io_idx, w_len);
+        if ((strm->ss != IO_SEND) || (strm->head != 0) || (strm->lua_status != 1))
+            break;
 
-				idx += w_len;
+        w_len = MIN((len - idx), (strm->io_len - strm->io_idx));
 
-				if ((strm->io_idx += w_len) < strm->io_len)
-						break;
+        memcpy(buf + idx, strm->io_buf + strm->io_idx, w_len);
 
-				// resume lua execution after we retrieved the value
-		    if ((strm->lua_status = lua_run(strm->T, strm->L, 0)) != LUA_YIELD) {
-				    lthread_remove(strm->L, &strm->T);
-						break;
-				}
-		}
+        idx += w_len;
 
-		// return index of how much we received from lua
-		return idx;
+        if ((strm->io_idx += w_len) < strm->io_len)
+            break;
+
+        // resume lua execution after we retrieved the value
+        if ((strm->lua_status = lua_run(strm->T, strm->L, 0)) != LUA_YIELD) {
+//            strm->ss = IO_CLOSE;
+            break;
+        }
+    }
+
+    // flag the connection about app i/o activity
+    strm->conn->cs |= strm->ss;
+
+    // return index of how much we received from lua
+    return idx;
 }
 
 // read event callback function for lua fd
 // resumes the connection transmission when lua stops blocking
 void
-//strm_read(int fd, void* ctx)
 strm_read(struct edata *ev)
 {
-		struct stream* strm = ev->ctx;
-	  struct connect* conn = strm->conn;
-	  lua_State* T = strm->T;
-		char buf[BUFFER_SIZE];
-	  ssize_t len;
+    struct aio_data *aio_d = ev->ctx;
+    struct stream *strm = aio_d->ctx;
+    struct connection *conn = strm->conn;
+    lua_State *T = strm->T;
+    ssize_t len;
 
-		// read event fired, let's do some reading
-		len = read(ev->fd, &buf, MIN(BUFFER_SIZE, (strm->io_len - strm->io_idx)));
+    log_dbg(5, "%s: ev %p", __func__, ev);
 
-		if (len < 0) {
-			  log_dbg(5, "errno: %s", strerror(errno));
-			  if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
-					  return;
-			  // handle some fd error
-		} else if (len == 0) {
-				if (strm->io_idx > 0) {
-					  strm->io_len = strm->io_idx; // assign 0 to the len so we can pushnil next time
-					  luaL_pushresult(&strm->lb);
-				} else
+    // read event fired, let's do some reading
+    len = read(ev->fd, aio_d->buf + aio_d->pos, MIN(BUFFER_SIZE, (aio_d->len - aio_d->pos)));
+
+    if (len < 0) {
+        log_dbg(5, "errno: %s", strerror(errno));
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+            return;
+
+        // handle some fd error
+    } else if (len == 0) {
+        if (aio_d->pos > 0) {
+            lua_pushlstring(T, aio_d->buf, aio_d->pos);
+        } else
             lua_pushnil(strm->T);
-		} else {
-				luaL_addlstring(&strm->lb, buf, len);
-				if ((strm->io_idx += len) < strm->io_len)
-			      return;
 
-				luaL_pushresult(&strm->lb);
-		}
+    } else {
+        if ((aio_d->pos += len) < aio_d->len)
+            return;
 
-		//memset(&strm->aio_d, 0, sizeof (struct aio_data));
+        //luaL_pushresult(&strm->lb);
+        lua_pushlstring(T, aio_d->buf, aio_d->len);
+    }
 
-		// remove event from firing - we read all the data
-	  EQ_DEL(conn->thr->eq, &strm->ev, ev->fd, EV_READ);
+    // remove event from firing - we read all the data
+    EQ_DEL(conn->thr->eq, ev, ev->fd, EV_READ);
 
-		// signal we're no longer blocked by lua
-		strm->ss ^= SS_WAIT;
-
-    // reset event counters
-		strm->io_len = 0;
-		strm->io_idx = 0;
-
-	  // resume lua execution with the complete string on the lua stack
-    if ((strm->lua_status = lua_run(T, strm->L, 1)) == 0)
-	      lthread_remove(strm->L, &strm->T);
-
-		// check for new lua blocking before resuming connection
-		if (!(strm->ss & SS_WAIT))
-		    return conn_resume(strm);
+    return strm_resume(strm);
 }
 
 // write event callback function for lua fd
@@ -256,44 +285,36 @@ strm_read(struct edata *ev)
 void
 strm_write(struct edata *ev)
 {
-		struct stream* strm = ev->ctx;
-	  struct connect* conn = strm->conn;
-	  lua_State* T = strm->T;
-		ssize_t len;
+    struct aio_data *aio_d = ev->ctx;
+    struct stream *strm = aio_d->ctx;
+    struct connection *conn = strm->conn;
+    lua_State *T = strm->T;
+    ssize_t len;
 
-		// write event fired, let's do some writing
-    len = write(ev->fd, &strm->io_buf[strm->io_idx], (strm->io_len - strm->io_idx));
+    log_dbg(5, "%s: ev %p", __func__, ev);
 
-		// writing returned an error, log it and check if it's recovarable
-	  if (len < 0) {
-			  log_dbg(5, "errno: %s", strerror(errno));
-			  if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
-			      return;
-				}
-				// handle some fs error
-		// we wrote some data, check if we're done writing and add it to the lua buffer
-	  } else {
-				if ((strm->io_idx += len) < strm->io_len)
-			      return;
-	  }
+    // write event fired, let's do some writing
+    len = write(ev->fd, aio_d->buf + aio_d->pos, (aio_d->len - aio_d->pos));
 
-		// remove event from firing - we wrote all the data
-		EQ_DEL(conn->thr->eq, &strm->ev, ev->fd, EV_WRITE);
+    // writing returned an error, log it and check if it's recovarable
+    if (len < 0) {
+        log_dbg(5, "errno: %s", strerror(errno));
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+            return;
+        }
+        // handle some fs error
+    // we wrote some data, check if we're done writing and add it to the lua buffer
+    } else {
+        if ((aio_d->pos += len) < aio_d->len)
+            return;
+    }
 
-		// signal we're no longer blocked by lua
-		strm->ss ^= SS_WAIT;
+    lua_pushnumber(T, aio_d->pos);
 
-    // reset event counters
-    strm->io_idx = 0;
-    strm->io_len = 0;
+    // remove event from firing - we wrote all the data
+    EQ_DEL(conn->thr->eq, ev, ev->fd, EV_WRITE);
 
-		// resume lua execution with the complete event data on the lua stack
-    if ((strm->lua_status = lua_run(T, strm->L, 0)) == 0)
-		    lthread_remove(strm->L, &strm->T);
-
-		// check for new lua blocking before resuming connection
-		if (!(strm->ss & SS_WAIT))
-		    return conn_resume(strm);
+    return strm_resume(strm);
 }
 
 void stack_dump(lua_State *L, const char *stackname) {
@@ -346,343 +367,337 @@ void stack_dump(lua_State *L, const char *stackname) {
 static int
 lua_read(lua_State *L)
 {
-	  struct stream* strm;
-		int len;
+    struct stream *strm;
+    int len;
 
-		log_dbg(5, "LUA_READ");
+    log_dbg(5, "%s: L %p", __func__, L);
 
-		// check that the function is called with the right number of arguments
-	  if (lua_gettop(L) != 2) {
+    // check that the function is called with the right number of arguments
+    if (lua_gettop(L) != 2) {
         log_ex(NULL, 1, "httpd.read: expects exactly 2 arguments");
-			  return 0;
-		}
+        return 0;
+    }
 
-		// check that buffer size is a number
-		if ((len = lua_tointeger(L, 2)) < 1) {
-				log_ex(NULL, 1, "httpd.read: buffer size not a number");
-				return 0;
-		}
+    // check that buffer size is a number
+    if ((len = lua_tointeger(L, 2)) < 1) {
+        log_ex(NULL, 1, "httpd.read: buffer size not a number");
+        return 0;
+    }
 
-		// grab the strm stucture corresponding with the lua context
-		lua_pushlightuserdata(L, L);
-		lua_gettable(L, LUA_REGISTRYINDEX);
-		strm = (struct stream*) lua_touserdata(L, -1);
-		lua_pop(L, 1);
+    // grab the strm stucture corresponding with the lua context
+    strm = lh_getstrm(L);
 
-		// reset counters
-		strm->io_idx = 0;
-		strm->io_len = 0;
+    // if first argument is nil, we're reading data from the connection
+    if (lua_isnil(L, 1)) {
+        if (strm->http_method == GET) {
+            log_dbg(5, "lua_read: cannot read from connection during GET method");
+            lua_settop(L, 0);
+            lua_pushnil(L);
+            return 1;
+        }
 
-		// if first argument is nil, we're reading data from the connection
-		if (lua_isnil(L, 1)) {
-				if (strm->http_method == GET) {
-					  log_dbg(5, "lua_read: cannot read from connection during GET method");
-						return 0;
-				}
-			  strm->io_len = len;
+        // reset counters
+        strm->io_len = len;
+        strm->io_idx = 0;
 
-				strm->ss = SS_RECV;
-		// argument is a lua FILE structure, get it's file descriptor and add it to the event queue
+        strm->ss = IO_RECV;
+    // argument is a lua FILE structure, get it's file descriptor and add it to the event queue
     } else {
-			  struct aio_data *aio_d;
-			  FILE* f;
-				long int idx;
-				int fd;
-				int found = 0;
+        struct aio_data *aio_d;
+        FILE *f;
+        long int pos;
+        int fd;
 
-				// grab the FILE structure from lua
-				f = *(FILE**) luaL_checkudata(L, 1, LUA_FILEHANDLE);
+        // grab the FILE structure from lua
+        f = *(FILE **) luaL_checkudata(L, 1, LUA_FILEHANDLE);
 
-				// attempt to find an existing open file handle
-				//SIMPLEQ_FOREACH(aio_d, &strm->aio_d, next) {
-				LIST_FOREACH(aio_d, &strm->aio_d, next) {
-					  if (aio_d->f == f) {
-								found = 1;
+        lua_pushvalue(L, 1);
+        aio_d = (struct aio_data *) lh_getupval(L);
 
-								if ((aio_d->pos >= aio_d->flen) && (aio_d->ready> 0)) {
-    								LIST_REMOVE(aio_d, next);
-										return 0;
-								}
-								break;
-						}
-				}
+        if ((aio_d == NULL) || (aio_d->fd < 0)) {
+            struct stat st;
 
-				// it's a new file stream, init and get stats
-				if (found == 0) {
-						struct stat st;
+            lua_pushvalue(L, 1);
+            aio_d = (struct aio_data *) lua_newuserdata(L, sizeof(struct aio_data));
+            // check is malloc succeeded
+            if (aio_d == NULL)
+                return luaL_error(L, "malloc error");
 
-						// alloc memory for aio struct
-						aio_d = calloc(1, sizeof(struct aio_data));
+            memset(aio_d, 0, sizeof(struct aio_data));
+            lh_setupval(L);
 
-						// check is malloc succeeded
- 						if (aio_d == NULL)
-						    return luaL_error(L, "malloc error");
+            aio_d->buf = (char *) lua_newuserdata(L, sizeof(char) * (len + 1));
+            lua_pushthread(L);
+            lua_insert(L, -2);
+            lh_setupval(L);
 
-						// retreive the corresponding file descriptor from the FILE structure
-						if ((aio_d->fd = fileno(f)) < 0)
-								return luaL_error(L, "invalid file descriptor associated with lua stream");
+            // retreive the corresponding file descriptor from the FILE structure
+            if ((aio_d->fd = fileno(f)) < 0)
+                return luaL_error(L, "invalid file descriptor associated with lua stream");
 
-						aio_d->f = f;
-						aio_d->buf = strm->io_buf; //aio_d->buf = NULL;
-						aio_d->ctx = strm;
+            aio_d->ctx = strm;
 
-						// get value of position indicator for the lua FILE
-						aio_d->pos = ftell(f);
+            // get value of position indicator for the lua FILE
+            pos = ftell(f);
 
-						// if the returned position is valid, calculate file size so we can stet up AIO reads
-						if (aio_d->pos >= 0) {
-								fstat(aio_d->fd, &st);
-								aio_d->flen = st.st_size;
-								//fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_DIRECT); // why does this break it?
+            // if the returned position is valid, calculate file size so we can stet up AIO reads
+            if ((aio_d->pos = ftell(f)) >= 0) {
+                fstat(aio_d->fd, &st);
+                aio_d->flen = st.st_size;
+                //fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_DIRECT);
+            } else {
+                // it's a FIFO stream, set it to non-blocking before adding it to the event system
+                fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_NONBLOCK);
+                aio_d->flen = -1;
+            }
 
-						} else {
-						    // it's a FIFO stream, set it to non-blocking before adding it to the event system
-						    fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_NONBLOCK);
-						}
+        } else if (len > aio_d->len) {
+            aio_d->buf = (char *) lua_newuserdata(L, sizeof(char) * (len + 1));
+            lua_pushthread(L);
+            lua_insert(L, -2);
+            lh_setupval(L);
+        }
 
+        if (aio_d->flen > -1) {
+            if ((aio_d->len = MIN((aio_d->flen - aio_d->pos), len)) <= 0)
+                return 0;
 
+            schedule_aio(strm->conn->thr->aio, aio_d, EV_READ);
+        } else {
+            aio_d->pos = 0;
+            aio_d->len = len;
+            EQ_ADD(strm->conn->thr->eq, &strm->ev, aio_d->fd, EV_READ, strm_read, aio_d, 0);
+        }
 
-						// add it to the queue
-						//SIMPLEQ_INSERT_TAIL(&strm->aio_d, aio_d, next);
-						LIST_INSERT_HEAD(&strm->aio_d, aio_d, next);
-				}
+        // flag that we need to wait for ready event
+        strm->ss = IO_NONE;
+    }
 
-				// set up a lua buffer to use for our read events
-				luaL_buffinit(L, &strm->lb);
-
-				if (aio_d->pos >= 0) {
-					  // struct stat st;
-					  //fstat(fileno(f), &st);
-					  //aio_d->flen = st.st_size;
-						aio_d->len = MIN((aio_d->flen - aio_d->pos), len);
-						strm->io_len = aio_d->len;
-						if (aio_d->len <= 0)
-						    return 0;
-
-						schedule_aio_read(strm->conn->thr->aio, aio_d);
-				} else {
-				    aio_d->len = len;
-						strm->io_len = len;
-						EQ_ADD(strm->conn->thr->eq, &strm->ev, aio_d->fd, EV_READ, strm_read, strm, 0);
-				}
-
-				// flag that we need to wait for ready event
-				strm->ss |= SS_WAIT;
-		}
-		// yield lua coroutine
-		return lua_yield(L, 0);
+    lua_settop(L, 0);
+    // yield lua coroutine
+    return lua_yield(L, 0);
 }
 
 
 static int
 lua_write(lua_State *L)
 {
-	  struct stream* strm;
-	  struct connect *conn;
-		const char* buf;
+    struct stream *strm;
+    struct connect *conn;
+    const char *buf;
+    size_t len;
 
-		// check that the function is called with the right number of arguments
-		if (lua_gettop(L) != 2) {
+    log_dbg(5, "%s: L %p", __func__, L);
+
+    // check that the function is called with the right number of arguments
+    if (lua_gettop(L) != 2) {
         log_ex(NULL, 1, "httpd.write expects exactly 2 arguments");
-			  return 0;
-		}
+        return 0;
+    }
 
-		// check that buffer size is a number
-		if (lua_type(L, 2) != LUA_TSTRING) {
-				log_dbg(5, "httpd.write: value not a string");
-				return 0;
-		}
+    // check that buffer size is a number
+    if (lua_type(L, 2) != LUA_TSTRING) {
+        log_dbg(5, "%s: (value not a string)", __func__);
+        return 0;
+    }
 
-		// grab the strm stucture corresponding with the lua context
-		lua_pushlightuserdata(L, L);
-		lua_gettable(L, LUA_REGISTRYINDEX);
-		strm = (struct stream*) lua_touserdata(L, -1);
-		lua_pop(L, 1);
+    // grab the strm stucture corresponding with the lua context
+    strm = lh_getstrm(L);
 
-		// reset counters
-		strm->io_idx = 0;
-		strm->io_len = 0;
+    // if first argument is nil, we're writing data into the connection
+    if (lua_isnil(L, 1)) {
+        if (strm->http_method == POST) {
+            log_dbg(5, "lua_write: cannot write into connection during POST method");
+            return 0;
+        }
 
-		// if first argument is nil, we're writing data into the connection
-		if (lua_isnil(L, 1)) {
-			  if ((strm->http_method == POST) && (strm->not_found == 0)) {
-				    log_dbg(5, "lua_write: cannot write into connection during POST method");
-					  return 0;
-				}
+        // reset counters
+        strm->io_idx = 0;
+        strm->io_buf = (char *) lua_tolstring(L, 2, &strm->io_len);
 
-				strm->io_buf = (char*) lua_tolstring(L, 2, &strm->io_len);
+        // flag that stream has data to send
+        strm->ss = IO_SEND;
 
-				// flag that stream has data to send
-			  strm->ss = SS_SEND;
-
-		// argument is a lua FILE structure, get it's file descriptor and add it to the event queue
+    // argument is a lua FILE structure, get it's file descriptor and add it to the event queue
     } else {
-	      FILE* f;
-				int fd;
-				struct aio_data *aio_d;
-				long int pos;
-				int found = 0;
+        struct aio_data *aio_d;
+        FILE *f;
+        int fd;
+        long int pos;
 
-				// grab the file structure from lua
-				f = *(FILE**) luaL_checkudata(L, 1, LUA_FILEHANDLE);
+        // grab the file structure from lua
+        f = *(FILE **) luaL_checkudata(L, 1, LUA_FILEHANDLE);
 
-				// attempt to find an existing open file handle
-				//SIMPLEQ_FOREACH(aio_d, &strm->aio_d, next) {
-				LIST_FOREACH(aio_d, &strm->aio_d, next) {
-						if (aio_d->f == f) {
-								found = 1;
-								break;
-						}
-				}
+        lua_pushvalue(L, 1);
+        aio_d = (struct aio_data *) lh_getupval(L);
 
-				// it's a new file stream, init and get stats
-				if (found == 0) {
-						struct stat st;
+        // it's a new file stream, init and get stats
+        if ((aio_d == NULL) || (aio_d->fd < 0)) {
+            struct stat st;
 
-						// alloc memory for aio struct
-						aio_d = calloc(1, sizeof(struct aio_data));
+            lua_pushvalue(L, 1);
+            aio_d = (struct aio_data *) lua_newuserdata(L, sizeof(struct aio_data));
+            memset(aio_d, 0, sizeof(struct aio_data));
 
-						// check is malloc succeeded
-						if (aio_d == NULL)
-								return luaL_error(L, "malloc error");
+            lh_setupval(L);
 
-						// retreive the corresponding file descriptor from the FILE structure
-						if ((aio_d->fd = fileno(f)) < 0)
-								return luaL_error(L, "invalid file descriptor associated with lua stream");
+            // check is malloc succeeded
+            if (aio_d == NULL)
+                return luaL_error(L, "malloc error");
 
-						aio_d->f = f;
-						aio_d->ctx = strm;
+            // retreive the corresponding file descriptor from the FILE structure
+            if ((aio_d->fd = fileno(f)) < 0)
+                return luaL_error(L, "invalid file descriptor associated with lua stream");
 
-						// get value of position indicator for the lua FILE
-						aio_d->pos = ftell(f);
+            aio_d->ctx = strm;
 
-						// if the returned position is valid, calculate file size so we can stet up AIO reads
-						if (aio_d->pos >= 0) {
-								//fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_DIRECT); // why does this break it, bug?
-						} else
-								// it's a FIFO stream, set it to non-blocking before adding it to the event system
-								fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_NONBLOCK);
+            // get value of position indicator for the lua FILE
+            aio_d->pos = ftell(f);
 
-						// add it to the queue
-						//SIMPLEQ_INSERT_TAIL(&strm->aio_d, aio_d, next);
-						LIST_INSERT_HEAD(&strm->aio_d, aio_d, next);
-				}
+            // if the returned position is valid, calculate file size so we can stet up AIO reads
+            if (aio_d->pos >= 0) {
+                //fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_DIRECT); // why does this break it, bug?
+            } else
+                aio_d->flen = -1;
+                // it's a FIFO stream, set it to non-blocking before adding it to the event system
+                fcntl(aio_d->fd, F_SETFL, fcntl(aio_d->fd, F_GETFL, 0) | O_NONBLOCK);
+        }
 
-				// get the lua string and its size
-				strm->io_buf = (char*) lua_tolstring(L, 2, &strm->io_len);
-				aio_d->buf = strm->io_buf; //aio_d->buf = NULL;
-				aio_d->len = strm->io_len;
+        aio_d->buf = (char *) lua_tolstring(L, 2, &aio_d->len);
 
-				if (aio_d->pos >= 0) {
-						if (aio_d->len <= 0)
-								return 0;
-						schedule_aio_write(strm->conn->thr->aio, aio_d);
-				} else {
-						// add it to the event queue to fire when write ready
-						EQ_ADD(strm->conn->thr->eq, &strm->ev, aio_d->fd, EV_WRITE, strm_write, strm, 0);
-				}
+        if (aio_d->flen > -1) {
+            if (aio_d->len <= 0)
+                return 0;
 
-				// flag that we need to wait for ready event
-				strm->ss |= SS_WAIT;
-		}
-		// yield lua coroutine
-    return lua_yield(L, 1);
+            schedule_aio(strm->conn->thr->aio, aio_d, EV_WRITE);
+        } else {
+            aio_d->pos = 0;
+            // add it to the event queue to fire when write ready
+            EQ_ADD(strm->conn->thr->eq, &strm->ev, aio_d->fd, EV_WRITE, strm_write, aio_d, 0);
+        }
+
+        // flag that we need to wait for ready event
+        strm->ss = IO_NONE;
+    }
+
+    lua_settop(L, 0);
+    // yield lua coroutine
+    return lua_yield(L, 0);
 }
 
 static int
 lua_header(lua_State *L)
 {
-	  struct stream* strm;
+    struct stream *strm;
 
-		// check that the function is called with the right number of arguments
-		if (lua_gettop(L) != 1) {
-				log_ex(NULL, 1, "httpd.header: expects exactly 1 argument");
-				return 0;
-		}
+    log_dbg(5, "%s: L %p", __func__, L);
 
-		lua_pushlightuserdata(L, L);
-		lua_gettable(L, LUA_REGISTRYINDEX);
-		strm = (struct stream*) lua_touserdata(L, -1);
+    // check that the function is called with the right number of arguments
+    if (lua_gettop(L) != 1) {
+        log_ex(NULL, 1, "httpd.header: expects exactly 1 argument");
+        return 0;
+    }
 
-		lua_pop(L, 1);
-    lua_pushnil(L);
+    strm = lh_getstrm(L);
 
-		strm->ss = SS_HEAD;
+    strm->io_len = 0;
+    strm->io_idx = 0;
 
-		stack_dump(L, "TTTTTJJ");
-		return lua_yield(L, 2);
-} //f
+    strm->ss = IO_SEND;
+    strm->head = 1;
+
+    return lua_yield(L, 1);
+}
 
 static int
 luaopen_httpd(lua_State *L)
 {
-	  struct luaL_Reg functions[] = {
-		    { "read",		lua_read },
-		    { "register_handler",	register_handler },
-		    { "write",		lua_write },
-		    { "header",  lua_header},
-		    { NULL, NULL }
-	  };
+    log_dbg(5, "%s: L %p", __func__, L);
 
-#if LUA_VERSION_NUM >= 502
-		luaL_newlib(L, functions);
-#else
-	  luaL_register(L, "httpd", functions);
-#endif
+    lua_newtable (L); /* make environment "private storage" */
+//    lua_createtable (L, 0, 1); /* its metatable, which is */
+//    lua_pushliteral (L, "__mode"); /* used to make environment */
+//    lua_pushliteral (L, "k"); /* weak in the keys */
+//    lua_rawset (L, -3); /* metatable.__mode = "k" */
+//    lua_setmetatable (L, -2);
 
-	  lua_pushstring(L, "httpd 1.0.0");
-	  lua_setfield(L, -2, "_VERSION");
-	  return 1;
+    struct luaL_Reg functions[] = {
+        { "read",    lua_read },
+        { "register_handler",  register_handler },
+        { "write",    lua_write },
+        { "header",  lua_header},
+        { NULL, NULL }
+    };
+
+    lh_setenv(L, functions, 1);
+
+    lua_pushstring(L, "httpd 1.0.0");
+    lua_setfield(L, -2, "_VERSION");
+    return 1;
 }
 
 int
-//lua_map_create(struct thread* thr, const char *prefix, const char *script)
-lua_map_create(struct thread* thr, struct l_map *l_map)
+lua_map_create(struct thread *thr, struct l_map *l_map)
 {
-		struct lua_map *lm;
+    struct lua_map *lm;
 
-		SIMPLEQ_FOREACH(lm, l_map, next) {
-			  struct lua_state_map* Lm;
+    log_dbg(5, "%s: thr %p l_map %p", __func__, thr, l_map);
 
-			  if ((access(lm->script, F_OK) < 0))
-					  return -1;
+    SIMPLEQ_FOREACH(lm, l_map, next) {
+        struct lua_state_map *Lm;
 
-				if ((Lm = malloc(sizeof(struct lua_state_map))) == NULL)
-				    return -1;
+        if ((access(lm->script, F_OK) < 0))
+            return -1;
 
-				while (*lm->prefix == '/')
-						lm->prefix++;
+        if ((Lm = malloc(sizeof(struct lua_state_map))) == NULL)
+            return -1;
 
-				Lm->prefix = lm->prefix;
-				Lm->script = lm->script;
-				SIMPLEQ_INIT(&Lm->l_hand);
-				//Lm->l_hand = NULL;
+        while ((*lm->prefix == '/') && (*(lm->prefix + 1) == '/'))
+                lm->prefix++;
 
-				if ((Lm->L = luaL_newstate()) == NULL)
-						return -1;
+        Lm->prefix = lm->prefix;
+        Lm->script = lm->script;
+        SIMPLEQ_INIT(&Lm->l_hand);
 
-				luaL_openlibs(Lm->L);
-				lua_getglobal(Lm->L, "package");
-				lua_getfield(Lm->L, -1, "preload");
-				lua_pushcfunction(Lm->L, luaopen_httpd);
-				lua_setfield(Lm->L, -2, "httpd");
-				lua_pop(Lm->L, 2);
+        if ((Lm->L = luaL_newstate()) == NULL)
+            return -1;
 
-				lua_pushstring(Lm->L, "lua_state_map");
-				lua_pushlightuserdata(Lm->L, Lm);
-				lua_settable(Lm->L, LUA_REGISTRYINDEX);
+        luaL_openlibs(Lm->L);
+        lua_getglobal(Lm->L, "package");
+        lua_getfield(Lm->L, -1, "preload");
+        lua_pushcfunction(Lm->L, luaopen_httpd);
+        lua_setfield(Lm->L, -2, "httpd");
+        lua_pop(Lm->L, 2);
 
-				if (luaL_loadfile(Lm->L, lm->script)) {
-						log_dbg(5, "failed to load script %s: %s", lm->script, lua_tostring(Lm->L, -1));
-				    return -1;
-				}
-				if (lua_pcall(Lm->L, 0, 0, 0)) {
-						log_dbg(5, "failed to execute script %s: %s", lm->script, lua_tostring(Lm->L, -1));
-				    return -1;
-				}
+        lua_pushstring(Lm->L, "lua_state_map");
+        lua_pushlightuserdata(Lm->L, Lm);
+        lua_settable(Lm->L, LUA_REGISTRYINDEX);
 
-				SIMPLEQ_INSERT_TAIL(&thr->L_map, Lm, next);
-		}
+        lua_newtable(Lm->L);
+        lua_newtable(Lm->L);
+        lua_pushstring(Lm->L, "k");
+        lua_setfield(Lm->L, -2, "__mode");
+        lua_setmetatable(Lm->L, -2);
+        lua_setfield(Lm->L, LUA_REGISTRYINDEX, "httpd.data");
+
+//        luaL_getmetatable(Lm->L, LUA_FILEHANDLE);
+//        lua_pushcclosure(L, cleanup_fn, 1);
+//        lua_pushcfunction(Lm->L, cleanup_fn);
+//        lua_setfield(Lm->L, -2, "__gc");
+//        lua_setmetatable(Lm->L, -2);
+
+        if (luaL_loadfile(Lm->L, lm->script)) {
+            log_dbg(5, "failed to load script %s: %s", lm->script, lua_tostring(Lm->L, -1));
+            return -1;
+        }
+
+        if (lua_pcall(Lm->L, 0, 0, 0)) {
+            log_dbg(5, "failed to execute script %s: %s", lm->script, lua_tostring(Lm->L, -1));
+            return -1;
+        }
+
+        SIMPLEQ_INSERT_TAIL(&thr->L_map, Lm, next);
+    }
 
     return 0;
 }
@@ -691,56 +706,58 @@ lua_map_create(struct thread* thr, struct l_map *l_map)
 static int
 register_handler(lua_State *L)
 {
-    struct lua_state_map* Lm;
-    struct lua_handler* lh;
-    struct thread* thr;
+    struct lua_state_map *Lm;
+    struct lua_handler *lh;
+    struct thread *thr;
 
-		if ((lh = malloc(sizeof(struct lua_handler))) == NULL)
-		    return -1;
+    log_dbg(5, "%s: L %p", __func__, L);
 
-		lua_pushstring(L, "lua_state_map");
-		lua_gettable(L, LUA_REGISTRYINDEX);
-		Lm = lua_touserdata(L, -1);
+    if ((lh = malloc(sizeof(struct lua_handler))) == NULL)
+        return -1;
 
-		lua_pop(L, 1);
+    lua_pushstring(L, "lua_state_map");
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    Lm = lua_touserdata(L, -1);
 
-		luaL_checkstring(L, 1);
-		luaL_checktype(L, 2, LUA_TFUNCTION);
+    lua_pop(L, 1);
 
-		lh->name = e_strdup(lua_tostring(L, 1));
-		lh->ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
 
-		log_dbg(5, "HERE: %s", lh->name);
+    lh->name = e_strdup(lua_tostring(L, 1));
+    lh->ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
-		SIMPLEQ_INSERT_TAIL(&Lm->l_hand, lh, next);
+    SIMPLEQ_INSERT_TAIL(&Lm->l_hand, lh, next);
 
-	  return 0;
+    return 0;
 }
 
 void
 lh_aio_dispatch(struct aio_data *aio_d)
 {
-	  struct stream *strm = (struct stream *) aio_d->ctx;;
-		int rv;
-log_dbg(5, "YAYA");
-stack_dump(strm->T, "DISPATCH");
-log_dbg(5, "len %i buf: %s", aio_d->len, aio_d->buf);
-log_dbg(5, "len %i buf: %s", strm->io_len, strm->io_buf);
+    struct stream *strm;
+    int rv;
 
-		rv = aio_d->len;
+    log_dbg(5, "%s: aio_d %p", __func__, aio_d);
 
-		if (rv < 0) {
-		    strm->ss = SS_ERROR;
-				lua_pushnil(strm->T);
-		} else if (aio_d->buf != NULL) {
-				if (rv == 0)
-						lua_pushnil(strm->T);
-				else {
-					  //lua_pushlstring(strm->T, acb->aio_buf, acb->aio_nbytes);
-						log_dbg(5, "TT");
-						lua_pushlstring(strm->T, aio_d->buf, rv);
-				}
-		}
+    if (aio_d == NULL)
+        return;
 
-		return strm_resume(strm);
+    if ((strm = (struct stream *) aio_d->ctx) == NULL)
+        return;
+
+    rv = aio_d->len;
+
+    if (rv < 0) {
+        log_dbg(5, "%s: (AIO Error)", __func__);
+        strm->h2_error = INTERNAL_ERROR;
+        lua_pushnil(strm->T);
+    } else if (aio_d->buf != NULL) {
+        if (rv == 0)
+            lua_pushnil(strm->T);
+        else
+            lua_pushlstring(strm->T, aio_d->buf, rv);
+    }
+
+    return (strm_resume(strm));
 }
