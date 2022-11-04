@@ -302,38 +302,15 @@ int lev_write(struct stream* strm, char* buf, int len);
 int lua_run(lua_State *, lua_State *, int);
 void lh_aio_dispatch(struct aio_data *aio_d);
 
-
 // httpd-aio
-
 void thread_wakeup(struct edata *ev);
 
 //httpd.c
 char* e_strdup(const char* oldstr);
 void* serve(void *thread);
-
 int new_conn(struct thread* thr);
-void del_conn(struct connection *conn);
-
 void conntab_create(struct edata *ev);
-void conntab_remove(struct connection *);
-void conntab_update(struct connection *);
-
-void conn_read(struct edata *ev);
-void conn_write(struct edata *ev);
-
-void http_write_header(struct connection *conn);
-void http_write_body(struct connection *conn);
-
 void conn_io(struct connection *conn);
-void conn_resume(struct stream*);
-void rw_io(void* edata);
-void reset_headers(struct stream*);
-
-//int http2_write(struct connect*, char*, int);
-//int http2_read(struct connection *, char*, int);
-
-struct stream* new_strm(struct connection *conn, uint32_t sid);
-struct stream* h2_find_stream(struct connection *conn, uint32_t h2_sid);
 
 static long ts_to_tv(struct timespec* ts);
 struct timespec tv_to_ts(unsigned long tv);
