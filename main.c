@@ -34,7 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "httpd.h"
 
 static void
-sig_sigaction(int signo, siginfo_t *info, void* ctx)
+sig_sigaction(int signo, siginfo_t *info, void *ctx)
 {
     struct thread *thr = (struct thread *) info->si_value.sival_ptr;
     struct server *srv = thr->srv;
@@ -193,7 +193,7 @@ init(struct server *srv, config *cfg)
         TAILQ_INIT(&srv->thr[i].conn_t);
 
         if((new_conn(&srv->thr[i])) < 0)
-        log_ex(srv, 1, "error preallocating connection - %s", strerror(errno));
+            log_ex(srv, 1, "error preallocating connection - %s", strerror(errno));
 
         log_dbg(5, "->> thread %i equeue\n", i);
         if ((srv->thr[i].eq = EQ_INIT()) == NULL)
@@ -233,7 +233,7 @@ init(struct server *srv, config *cfg)
 int
 main(int argc, char **argv)
 {
-    struct server* srv;
+    struct server *srv;
     struct config *cfg;
     int i;
 
