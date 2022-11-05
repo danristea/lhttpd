@@ -340,16 +340,16 @@ start_lua(struct connection *conn, struct L_map *L_map, char *path)
 
 //      lua_pushstring(T, inet_ntop(AF_INET6, &conn->thr->srv->sa.sin6_addr, addr, INET6_ADDRSTRLEN));
 
-//			inet_ntop(AF_INET4, &conn->thr->srv->sa.sin6_addr, addr, INET_ADDRSTRLEN);
-//			inet_ntop(conn->ss.ss_family, get_in_addr((struct sockaddr *)&conn->thr->srv->ss), addr, INET_ADDRSTRLEN);
+//      inet_ntop(AF_INET4, &conn->thr->srv->sa.sin6_addr, addr, INET_ADDRSTRLEN);
+//      inet_ntop(conn->ss.ss_family, get_in_addr((struct sockaddr *)&conn->thr->srv->ss), addr, INET_ADDRSTRLEN);
 
-//			lua_pushstring(strm->T, addr);
+//      lua_pushstring(strm->T, addr);
 
-//			lua_setfield(T, -2, "SERVER_ADDR");
-//			log_dbg(5, "### %s", conn->thr->srv->sa46.sa.sa_data);
-//			lua_pushstring(T, conn->thr->srv->sa46.sa.sa_data);
-//			lua_pushinteger(T, ntohs(conn->thr->srv->sa46.sa.sin6_port));
-//			lua_setfield(T, -2, "SERVER_PORT");
+//      lua_setfield(T, -2, "SERVER_ADDR");
+//      log_dbg(5, "### %s", conn->thr->srv->sa46.sa.sa_data);
+//      lua_pushstring(T, conn->thr->srv->sa46.sa.sa_data);
+//      lua_pushinteger(T, ntohs(conn->thr->srv->sa46.sa.sin6_port));
+//      lua_setfield(T, -2, "SERVER_PORT");
 
         if (conn->ss.ss_family == AF_INET) {
   struct sockaddr_in *s = (struct sockaddr_in *)&conn->ss;
@@ -455,7 +455,7 @@ http2_header(struct stream *strm, char *buf, int len)
   strm->h2_ss == SS_HCLOSED_LOCAL;
 
     // otherwise process it as a promise header
- 	  } else {
+     } else {
   struct connection *conn = strm->conn;
     struct stream* pstrm;
   uint32_t psid;
@@ -663,11 +663,11 @@ conntab_remove(struct connection *conn)
 
   log_dbg(5, "%s: conn %p fd: %i", __func__, conn, conn->fd);
 
-//		if (conn->ev.filter & EV_READ)
-//		    EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
+//    if (conn->ev.filter & EV_READ)
+//        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
 
-//	  if (conn->ev.filter & EV_WRITE)
-//		    EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
+//    if (conn->ev.filter & EV_WRITE)
+//        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
 
     close(conn->fd);
 
@@ -905,7 +905,7 @@ parse_http(struct connection *conn, char *buf, int len)
   // check if the request is done
   if (c - buf <= 1) {
     if ((strm->lua_status = lua_run(strm->T, strm->L, 2)) > LUA_YIELD) {
-   				log_dbg(5, "%s: (error calling Lua handler)", __func__);
+           log_dbg(5, "%s: (error calling Lua handler)", __func__);
   conn->http_error = 500;
   return -1;
   }
@@ -1069,7 +1069,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
       rv = check_ss(strm, h2_ss, frm.f_typ);
 
   if (rv < 0) {
- 					  //conn->h2_error = PROTOCOL_ERROR;
+             //conn->h2_error = PROTOCOL_ERROR;
   return -1;
   }
   }
@@ -1086,7 +1086,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
   return -1;
 
   // if it's the end of a stream with settings, length must be 0 and we must send back settings confirmation
-   	  } else if ((frm.f_flg & 1) != 0) {
+       } else if ((frm.f_flg & 1) != 0) {
       if (frm.f_len != 0) {
     conn->h2_error = FRAME_SIZE_ERROR;
     return -1;
@@ -1258,38 +1258,38 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
             strm->authority = auth;
 
   // :path
-    				lua_pushstring(strm->T, hb->hdr_value);
-    				lua_setfield(strm->T, -2, hb->hdr_name);
+            lua_pushstring(strm->T, hb->hdr_value);
+            lua_setfield(strm->T, -2, hb->hdr_name);
 
   // :method
   lua_pushstring(strm->T, method);
-    				lua_setfield(strm->T, -2, ":method");
+            lua_setfield(strm->T, -2, ":method");
 
   // :authority
   if (auth != NULL) {
-      			  lua_pushstring(strm->T, auth);
-        				lua_setfield(strm->T, -2, ":authority");
-    				}
+              lua_pushstring(strm->T, auth);
+                lua_setfield(strm->T, -2, ":authority");
+            }
 
   // :scheme
   if (schm != NULL) {
-      				lua_pushstring(strm->T, schm);
-        				lua_setfield(strm->T, -2, ":scheme");
+              lua_pushstring(strm->T, schm);
+                lua_setfield(strm->T, -2, ":scheme");
   }
 
   } else {
-    				// remaining header fields
-    				lua_pushstring(strm->T, hb->hdr_value);
-    				lua_setfield(strm->T, -2, hb->hdr_name);
+            // remaining header fields
+            lua_pushstring(strm->T, hb->hdr_value);
+            lua_setfield(strm->T, -2, hb->hdr_name);
   }
-    			}
+          }
         } else {
   log_dbg(5, "%s: (hpack decoding failed)", __func__);
         return -1;
         }
 
   if (strm == NULL) {
-    			conn->h2_error = INTERNAL_ERROR;
+          conn->h2_error = INTERNAL_ERROR;
   //conn->http_error = 500;
   return -1;
   } else if ((strm->lua_status = lua_run(strm->T, strm->L, 2)) > LUA_YIELD) {
@@ -1330,7 +1330,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
     return -1;
         } else {
             log_dbg(5, "RST_STREAM: id %u, err %u", frm.f_sid, ntohl(*(uint32_t *)data));
-     				strm->h2_ss = SS_CLOSED;
+             strm->h2_ss = SS_CLOSED;
         }
   } else if (frm.f_typ == DATA) {
   // return 0 because the rest of the processing needs to be done by the lua handler
@@ -1832,7 +1832,7 @@ http2_write(struct connection *conn, char **buf, int len)
   w_len += rv;
   }
 
-  if (strm->h2_error == NO_ERROR)	{
+  if (strm->h2_error == NO_ERROR)  {
 
     f_len = lev_write(strm, *buf + w_len + H2_HEADER_SIZE, MIN(conn->h2_set.max_frame_size, (len - w_len - H2_HEADER_SIZE)));
     h2_sid = strm->h2_sid;
