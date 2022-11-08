@@ -78,18 +78,6 @@ enum io_state {
     IO_WAIT = (0x10)
 };
 
-// BR_SSL_CLOSED    0x0001
-// BR_SSL_SENDREC   0x0002
-// BR_SSL_RECVREC   0x0004
-// BR_SSL_SENDAPP   0x0008
-// BR_SSL_RECVAPP   0x0010
-
-typedef union {
-    struct sockaddr		sa;
-    struct sockaddr_in	sa4;
-    struct sockaddr_in6	sa6;
-} sock_addr;
-
 typedef struct lua_map {
     const char 	*script;
     const char	*prefix;
@@ -205,7 +193,7 @@ struct server {
     int fd;
     int ti;
     uintptr_t aid; // fd or signal for aio signaling
-    sock_addr sa46;
+    struct sockaddr_storage ss;
     char *progname;
     char *pidfile;
     struct config *conf;
