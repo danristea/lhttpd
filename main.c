@@ -43,6 +43,48 @@ sig_sigaction(int signo, siginfo_t *info, void *ctx)
     assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
 }
 
+int
+socket_bind4(struct sockaddr_in *ip4addr, unsigned short int sin_port)
+{
+    int optval = 1;
+    int fd = -1;
+
+    ip4addr->sin_family = AF_INET;
+    ip4addr->sin_port = sin_port;
+
+    if ((fd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+        return -1;
+
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0)
+        return -1;
+
+    if (bind(fd, (struct sockaddr *)ip4addr, sizeof(struct sockaddr_in)) != 0)
+        return -1;
+
+    return fd;
+}
+
+int
+socket_bind6(struct sockaddr_in6 *ip6addr, unsigned short int sin_port)
+{
+    int optval = 1;
+    int fd = -1;
+
+    ip6addr->sin6_family = AF_INET6;
+    ip6addr->sin6_port = sin_port;
+
+    if ((fd = socket(PF_INET6, SOCK_STREAM, 0)) < 0)
+        return -1;
+
+    if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0)
+        return -1;
+
+    if (bind(fd, (struct sockaddr *)ip6addr, sizeof(struct sockaddr_in6)) != 0)
+        return -1;
+
+    return fd;
+}
+
 static void
 usage(struct server *srv)
 {
@@ -66,13 +108,13 @@ init(struct server *srv, config *cfg)
     sigset_t set;
     struct passwd *pw;
     char addr[INET6_ADDRSTRLEN] = {'\0'};
-    struct addrinfo h, *ai, *si;
+    uint16_t port;
     char buffer;
     int optval = 1;
     int rv;
 
     srv->conf = cfg;
-    srv->timeout = 70;
+    srv->timeout = 60;
 
     // ignore broken pipe and hangup signals
     memset(&sigact, 0, sizeof sigact);
@@ -109,37 +151,25 @@ init(struct server *srv, config *cfg)
         sigaction(SIGINT, &sigact, NULL);
     }
 
-    memset(&h, 0, sizeof h);
+    port = htons(strtol(cfg->port, (char **)NULL, 10));
 
-    h.ai_family = AF_UNSPEC; // use IPv4 or IPv6, whichever
-    h.ai_flags = AI_PASSIVE; // use my IP
-    h.ai_socktype = SOCK_STREAM;
-
-    if ((rv = getaddrinfo(cfg->addr, "443", &h, &si)) != 0)
-        log_ex(srv, 1, "call to getaddrinfo failed (%s)", gai_strerror(rv));
-
-    for (ai = si; ai != NULL; ai = ai->ai_next) {
-
-        if ((srv->fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) <= -1) {
-            log_ex(NULL, 5, "cannot create socket - %s", strerror(errno));
-            continue;
+    if (cfg->addr == NULL) {
+        ((struct sockaddr_in *) &(srv->ss))->sin_addr.s_addr = INADDR_ANY;
+        if ((srv->fd = socket_bind4((struct sockaddr_in *) &(srv->ss), port)) == -1) {
+            ((struct sockaddr_in6 *) &(srv->ss))->sin6_addr = in6addr_any;
+            if ((srv->fd = socket_bind6((struct sockaddr_in6 *) &(srv->ss), port)) == -1)
+                log_ex(srv, 1, "cannot create and bind server socket");
         }
-
-        if (setsockopt(srv->fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) == -1)
-            log_ex(srv, 0, "cannot reuse socket - %s", strerror(errno));
-
-        if (fcntl(srv->fd, F_SETFL, fcntl(srv->fd, F_GETFL, 0) | O_NONBLOCK) < 0)
-            log_ex(srv, 1, "cannot set non-blocking mode on server socket");
-
-        if (bind(srv->fd, ai->ai_addr, ai->ai_addrlen) == -1) {
-            close(srv->fd);
-            log_ex(NULL, 5, "cannot bind PF_INET6 socket - %s", strerror(errno));
-            continue;
-        }
-        break;
-    }
-    // free the server info addr struct
-    freeaddrinfo(si);
+    } else if (strchr(cfg->addr, '.')) {
+        inet_pton(AF_INET, cfg->addr, &((struct sockaddr_in *) &(srv->ss))->sin_addr);
+        if ((srv->fd = socket_bind4(((struct sockaddr_in *) &(srv->ss)), port)) == -1)
+            log_ex(srv, 1, "cannot create and bind ipv4 server socket");
+    } else if (strchr(cfg->addr, ':')) {
+        inet_pton(AF_INET6, cfg->addr, &((struct sockaddr_in6 *) &(srv->ss))->sin6_addr);
+        if ((srv->fd = socket_bind6(((struct sockaddr_in6 *) &(srv->ss)), port)) == -1)
+            log_ex(srv, 1, "cannot create and bind ipv6 server socket");
+    } else
+        log_ex(srv, 1, "invalid address");
 
     if (listen(srv->fd, SOMAXCONN) < 0)
         log_ex(srv, 1, "cannot listen on PF_INET6 socket - %s", strerror(errno));
@@ -246,6 +276,7 @@ main(int argc, char **argv)
         srv->progname++;
 
     cfg->addr = NULL;
+    cfg->port = NULL;
     SIMPLEQ_INIT(&cfg->l_map);
 
     for (i = 1; i < argc; i++) {
