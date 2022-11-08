@@ -168,7 +168,7 @@ aio_init(int pipe[2]) {
     aio->nlist = (struct aiocb *) calloc(MAX_AIO, sizeof(struct aiocb));
 
     memset(aio->alist, 0, sizeof(struct aiocb) * MAX_AIO);
-     memset(aio->nlist, 0, sizeof(struct aiocb) * MAX_AIO);
+    memset(aio->nlist, 0, sizeof(struct aiocb) * MAX_AIO);
 
     aio->ac = 0;
 
