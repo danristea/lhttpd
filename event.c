@@ -76,7 +76,7 @@ equeue_add(struct equeue *eq, struct edata *ev, int fd, short filter, void *cb, 
         return;
 
     // cleanup event struct not to pass garbage to kernel space
-    memset(ke + eq->ce, 0, sizeof(ke));
+    memset(ke + eq->ce, 0, sizeof(struct kevent));
 
     // populate the kernel event structure
     EV_SET(ke + eq->ce, fd, ev_map[filter], ((once == 1) ? (EV_ADD | EV_ENABLE | EV_ONESHOT) : EV_ADD), 0, 0, ev);
@@ -97,7 +97,7 @@ equeue_del(struct equeue *eq, struct edata *ev, int fd, short filter)
     ke = (struct kevent*) eq->celist;
 
     // cleanup event struct not to pass garbage to kernel space
-    memset(ke + eq->ce, 0, sizeof(ke));
+    memset(ke + eq->ce, 0, sizeof(struct kevent));
 
     EV_SET(ke + eq->ce, fd, ev_map[filter], EV_DELETE, 0, 0, ev);
 
