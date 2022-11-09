@@ -37,7 +37,6 @@ static void
 sig_sigaction(int signo, siginfo_t *info, void *ctx)
 {
     struct thread *thr = (struct thread *) info->si_value.sival_ptr;
-    struct server *srv = thr->srv;
     uint64_t eval = 1;
 
     assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
