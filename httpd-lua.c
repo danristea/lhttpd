@@ -105,9 +105,9 @@ lua_run(lua_State *T, lua_State *L, int n)
 {
 #if LUA_VERSION_NUM >= 504
     int na;
-    lua_resume(T, L, n, &na);
+    return lua_resume(T, L, n, &na);
 #else
-    lua_resume(T, n);
+    return lua_resume(T, n);
 #endif
 }
 
