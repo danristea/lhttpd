@@ -446,7 +446,7 @@ http2_header(struct stream *strm, char *buf, int len)
 
         // check the status code value and change the stream status accordingly
         if ((status < 100) || (status >= 400))
-            strm->h2_ss == SS_HCLOSED_LOCAL;
+            strm->h2_ss = SS_HCLOSED_LOCAL;
 
     // otherwise process it as a promise header
     } else {
@@ -657,11 +657,11 @@ conntab_remove(struct connection *conn)
 
     log_dbg(5, "%s: conn %p fd: %i", __func__, conn, conn->fd);
 
-//    if (conn->ev.filter & EV_READ)
-//        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
+    if (conn->ev.filter & EV_READ)
+        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
 
-//    if (conn->ev.filter & EV_WRITE)
-//        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
+    if (conn->ev.filter & EV_WRITE)
+        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
 
     close(conn->fd);
 
@@ -1068,7 +1068,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
     }
 
     if (frm.f_typ == SETTINGS) {
-    // if settings dont come on stream id 0, it's a protocol error
+        // if settings dont come on stream id 0, it's a protocol error
         if (strm && (strm->h2_sid != 0)) {
             conn->h2_error = PROTOCOL_ERROR;
             return -1;
@@ -1105,208 +1105,207 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
         //inc = ntohl(*(uint32_t *)data) & 0x7FFFFFFF;
         inc = (*(uint8_t *)&data[0] << 24) | (*(uint8_t *)&data[1] << 16) | (*(uint8_t *)&data[2] << 8) | (*(uint8_t *)&data[3]);
 
-  if (frm.f_sid == 0) {
-  if (inc == 0) {
-    conn->h2_error = PROTOCOL_ERROR;
-    return -1;
-  } else if ((conn->h2_set.window_size + inc) > ((1U << 31) - 1)) {
-  conn->h2_error = FLOW_CONTROL_ERROR;
-    return -1;
-        }
-  conn->h2_set.window_size += inc;
-  } else {
-      if (h2_ss == SS_CLOSED) {
-        //conn->h2_error = PROTOCOL_ERROR;
-        //return -1;
-      return 1;
-      } else if (inc == 0) {
-      strm->h2_error = PROTOCOL_ERROR;
-      strm->h2_ss = SS_CLOSED;
-      } else if ((strm->window_size + inc) > ((1U << 31) - 1))
-        strm->h2_error = FLOW_CONTROL_ERROR;
+        if (frm.f_sid == 0) {
+            if (inc == 0) {
+                conn->h2_error = PROTOCOL_ERROR;
+                return -1;
+            } else if ((conn->h2_set.window_size + inc) > ((1U << 31) - 1)) {
+                conn->h2_error = FLOW_CONTROL_ERROR;
+                return -1;
+            }
+            conn->h2_set.window_size += inc;
+        } else {
+            if (h2_ss == SS_CLOSED) {
+                //conn->h2_error = PROTOCOL_ERROR;
+                //return -1;
+                return 1;
+            } else if (inc == 0) {
+                strm->h2_error = PROTOCOL_ERROR;
+                strm->h2_ss = SS_CLOSED;
+            } else if ((strm->window_size + inc) > ((1U << 31) - 1))
+                strm->h2_error = FLOW_CONTROL_ERROR;
 
-      strm->window_size += inc;
-    }
-  return 1;
+            strm->window_size += inc;
+        }
+        return 1;
 
     // PRIORITY frame type receiver
     } else if (frm.f_typ == PRIORITY) {
 
-    // stream id cannot be 0, protocol error as per rfc7540
-    if (frm.f_sid == 0) {
-      conn->h2_error = PROTOCOL_ERROR;
-  return -1;
-  }
+        // stream id cannot be 0, protocol error as per rfc7540
+        if (frm.f_sid == 0) {
+            conn->h2_error = PROTOCOL_ERROR;
+            return -1;
+        }
 
-  // priority frame length is 5 octets, check
-  if (frm.f_len != 5) {
-      conn->h2_error = FRAME_SIZE_ERROR;
-  return -1;
-  }
+        // priority frame length is 5 octets, check
+        if (frm.f_len != 5) {
+            conn->h2_error = FRAME_SIZE_ERROR;
+            return -1;
+        }
 
-  // update latest seen stream id
-  if ((conn->h_sid < frm.f_sid) && (frm.f_sid % 2 != 0))
-  conn->h_sid = frm.f_sid;
+        // update latest seen stream id
+        if ((conn->h_sid < frm.f_sid) && (frm.f_sid % 2 != 0))
+        conn->h_sid = frm.f_sid;
 
-  /* TODO: set priority data to stream */
-          //set_priority(strm, frm.f_sid, (uint8_t *)data, IDLE);
+        /* TODO: set priority data to stream */
+        //set_priority(strm, frm.f_sid, (uint8_t *)data, IDLE);
 
-  return 1;
-  } else if (frm.f_typ == CONTINUATION) {
-      if ((frm.f_flg & (FF_END_STREAM | FF_PADDED | FF_PRIORITY)) != 0) {
-      conn->h2_error = PROTOCOL_ERROR;
-  return -1;
-  }
-  return 1;
-  } else if (frm.f_typ == HEADERS) {
-    char *key = NULL;
-    char *val = NULL;
-  size_t dec_len = frm.f_len;
-  enum http_method http_method;
-  char *method = NULL;
-  char *scheme = NULL;
-  char *authority = NULL;
-  int rv;
+        return 1;
+    } else if (frm.f_typ == CONTINUATION) {
+        if ((frm.f_flg & (FF_END_STREAM | FF_PADDED | FF_PRIORITY)) != 0) {
+            conn->h2_error = PROTOCOL_ERROR;
+            return -1;
+        }
+        return 1;
+    } else if (frm.f_typ == HEADERS) {
+        char *key = NULL;
+        char *val = NULL;
+        size_t dec_len = frm.f_len;
+        enum http_method http_method;
+        char *method = NULL;
+        char *scheme = NULL;
+        char *authority = NULL;
+        int rv;
 
-  if ((frm.f_sid == 0) || (frm.f_sid % 2 != 1)) {
-  conn->h2_error = PROTOCOL_ERROR;
-    return -1;
-    } //else
-    // TODO: Check number of open streams
+        if ((frm.f_sid == 0) || (frm.f_sid % 2 != 1)) {
+            conn->h2_error = PROTOCOL_ERROR;
+            return -1;
+        } //else
+        // TODO: Check number of open streams
 
-  conn->cont_sid = (frm.f_flg & FF_END_HEADERS) == 0 ? frm.f_sid: 0;
+        conn->cont_sid = (frm.f_flg & FF_END_HEADERS) == 0 ? frm.f_sid: 0;
 
-  // if it's padded adjust the encoded block
-  if (frm.f_flg & FF_PADDED) {
-  dec_len -= (*(uint8_t *)data) + 1;
-  data += 1;
-  }
+        // if it's padded adjust the encoded block
+        if (frm.f_flg & FF_PADDED) {
+            dec_len -= (*(uint8_t *)data) + 1;
+            data += 1;
+        }
 
-  // check if we need to reprioritize and adjust the encoded block
-  if (frm.f_flg & FF_PRIORITY) {
+        // check if we need to reprioritize and adjust the encoded block
+        if (frm.f_flg & FF_PRIORITY) {
 
-   // check for proper priority length and throw error if bogus
-  if (dec_len < 5) {
-  conn->h2_error = PROTOCOL_ERROR;
-  return -1;
-  }
-  /* TODO: set priority data to stream */
-  // set_priority(strm, frm.f_sid, (uint8_t *)data, SS_OPEN);
+            // check for proper priority length and throw error if bogus
+            if (dec_len < 5) {
+                conn->h2_error = PROTOCOL_ERROR;
+                return -1;
+            }
+            /* TODO: set priority data to stream */
+            // set_priority(strm, frm.f_sid, (uint8_t *)data, SS_OPEN);
 
-  // adjust the decoding info
-  dec_len -= 5;
-  data += 5;
-  }
+            // adjust the decoding info
+            dec_len -= 5;
+            data += 5;
+        }
 
-  // update latest seen stream id
-  if ((conn->h_sid < frm.f_sid) && (frm.f_sid % 2 != 0))
-  conn->h_sid = frm.f_sid;
+        // update latest seen stream id
+        if ((conn->h_sid < frm.f_sid) && (frm.f_sid % 2 != 0))
+            conn->h_sid = frm.f_sid;
 
         if ((conn->hpack_hbd = hpack_decode(data, dec_len, conn->hpack_dec)) != NULL) {
             struct hpack_header *hb;
-        enum http_method http_method;
-        char *auth = NULL;
-        char *schm = NULL;
+            enum http_method http_method;
+            char *auth = NULL;
+            char *schm = NULL;
 
-          TAILQ_FOREACH(hb, conn->hpack_hbd, hdr_entry) {
+            TAILQ_FOREACH(hb, conn->hpack_hbd, hdr_entry) {
 
-          if (strcasecmp(hb->hdr_name, ":method") == 0) {
-          method = hb->hdr_value;
-          if (strcasecmp(hb->hdr_value, "HEAD") == 0)
-          http_method = HEAD;
-          else if (strcasecmp(hb->hdr_value, "GET") == 0)
-          http_method = GET;
-          else if (strcasecmp(hb->hdr_value, "POST") == 0)
-          http_method = POST;
-          //else
-      //    log_dbg(5, "UNSUPPORTED_METHOD");
-          } else if (strcasecmp(hb->hdr_name, ":authority") == 0) {
-            if (strm && strm->T) {
-            lua_pushstring(strm->T, hb->hdr_value);
-            lua_setfield(strm->T, -2, hb->hdr_name);
-          } else
-                auth = hb->hdr_value;
-          } else if (strcasecmp(hb->hdr_name, ":scheme") == 0) {
-            if (strm && strm->T) {
-            lua_pushstring(strm->T, hb->hdr_value);
-            lua_setfield(strm->T, -2, hb->hdr_name);
-          } else
-              schm = hb->hdr_value;
-          } else if (strcasecmp(hb->hdr_name, ":path") == 0) {
-            strm = start_lua(conn, &conn->thr->L_map, hb->hdr_value);
+                if (strcasecmp(hb->hdr_name, ":method") == 0) {
+                    method = hb->hdr_value;
+                    if (strcasecmp(hb->hdr_value, "HEAD") == 0)
+                        http_method = HEAD;
+                    else if (strcasecmp(hb->hdr_value, "GET") == 0)
+                        http_method = GET;
+                    else if (strcasecmp(hb->hdr_value, "POST") == 0)
+                        http_method = POST;
+                    //else
+                    //    log_dbg(5, "UNSUPPORTED_METHOD");
+                } else if (strcasecmp(hb->hdr_name, ":authority") == 0) {
+                    if (strm && strm->T) {
+                        lua_pushstring(strm->T, hb->hdr_value);
+                        lua_setfield(strm->T, -2, hb->hdr_name);
+                    } else
+                        auth = hb->hdr_value;
+                } else if (strcasecmp(hb->hdr_name, ":scheme") == 0) {
+                    if (strm && strm->T) {
+                        lua_pushstring(strm->T, hb->hdr_value);
+                        lua_setfield(strm->T, -2, hb->hdr_name);
+                    } else
+                        schm = hb->hdr_value;
+                } else if (strcasecmp(hb->hdr_name, ":path") == 0) {
+                    strm = start_lua(conn, &conn->thr->L_map, hb->hdr_value);
 
-            if ((strm == NULL) || (strm->T == NULL)) {
-          break;
+                    if ((strm == NULL) || (strm->T == NULL))
+                        break;
+
+                    // adding to strm
+                    strm->h2_ss = SS_OPEN;
+
+                    strm->h2_sid = frm.f_sid;
+                    strm->h2_flg = frm.f_flg;
+
+                    strm->method = method;
+                    strm->http_method = http_method;
+                    strm->scheme = schm;
+                    strm->authority = auth;
+
+                    // :path
+                    lua_pushstring(strm->T, hb->hdr_value);
+                    lua_setfield(strm->T, -2, hb->hdr_name);
+
+                    // :method
+                    lua_pushstring(strm->T, method);
+                    lua_setfield(strm->T, -2, ":method");
+
+                    // :authority
+                    if (auth != NULL) {
+                        lua_pushstring(strm->T, auth);
+                        lua_setfield(strm->T, -2, ":authority");
+                    }
+
+                    // :scheme
+                    if (schm != NULL) {
+                        lua_pushstring(strm->T, schm);
+                        lua_setfield(strm->T, -2, ":scheme");
+                    }
+
+                } else {
+                    // remaining header fields
+                    lua_pushstring(strm->T, hb->hdr_value);
+                    lua_setfield(strm->T, -2, hb->hdr_name);
+                }
             }
-
-            // adding to strm
-          strm->h2_ss = SS_OPEN;
-
-            strm->h2_sid = frm.f_sid;
-            strm->h2_flg = frm.f_flg;
-
-            strm->method = method;
-            strm->http_method = http_method;
-            strm->scheme = schm;
-            strm->authority = auth;
-
-  // :path
-            lua_pushstring(strm->T, hb->hdr_value);
-            lua_setfield(strm->T, -2, hb->hdr_name);
-
-  // :method
-  lua_pushstring(strm->T, method);
-            lua_setfield(strm->T, -2, ":method");
-
-  // :authority
-  if (auth != NULL) {
-              lua_pushstring(strm->T, auth);
-                lua_setfield(strm->T, -2, ":authority");
-            }
-
-  // :scheme
-  if (schm != NULL) {
-              lua_pushstring(strm->T, schm);
-                lua_setfield(strm->T, -2, ":scheme");
-  }
-
-  } else {
-            // remaining header fields
-            lua_pushstring(strm->T, hb->hdr_value);
-            lua_setfield(strm->T, -2, hb->hdr_name);
-  }
-          }
         } else {
-  log_dbg(5, "%s: (hpack decoding failed)", __func__);
-        return -1;
+            log_dbg(5, "%s: (hpack decoding failed)", __func__);
+            return -1;
         }
 
-  if (strm == NULL) {
-          conn->h2_error = INTERNAL_ERROR;
-  //conn->http_error = 500;
-  return -1;
-  } else if ((strm->lua_status = lua_run(strm->T, strm->L, 2)) > LUA_YIELD) {
-  strm->http_status = INTERNAL_ERROR;
-  return 1;
-  }
-  } else if (frm.f_typ == PING) {
-  if (frm.f_len != 8) {
-  conn->h2_error = FRAME_SIZE_ERROR;
-  return -1;
-  } else if (frm.f_sid != 0) {
-    conn->h2_error = PROTOCOL_ERROR;
-    return -1;
-  } else if ((frm.f_flg & 1) == 0) {
-    // send_ping;
-    conn->send_ping = 1;
-  conn->ping_data = data + H2_HEADER_SIZE;
-  }
-  } else if (frm.f_typ == GOAWAY) {
-    if (frm.f_len >= 8) {
-  log_dbg(5, "Received GOAWAY (%d): %.*s", ntohl(*(uint32_t *)(data + H2_HEADER_SIZE + 4)), (frm.f_len - 8), ((data + H2_HEADER_SIZE + 8)));
-  }
-    return -1;
-  } else if (frm.f_typ == RST_STREAM) {
+        if (strm == NULL) {
+            conn->h2_error = INTERNAL_ERROR;
+            //conn->http_error = 500;
+            return -1;
+        } else if ((strm->lua_status = lua_run(strm->T, strm->L, 2)) > LUA_YIELD) {
+            strm->http_status = INTERNAL_ERROR;
+            return 1;
+        }
+    } else if (frm.f_typ == PING) {
+        if (frm.f_len != 8) {
+            conn->h2_error = FRAME_SIZE_ERROR;
+            return -1;
+        } else if (frm.f_sid != 0) {
+            conn->h2_error = PROTOCOL_ERROR;
+            return -1;
+        } else if ((frm.f_flg & 1) == 0) {
+            // send_ping;
+            conn->send_ping = 1;
+            conn->ping_data = data + H2_HEADER_SIZE;
+        }
+    } else if (frm.f_typ == GOAWAY) {
+        if (frm.f_len >= 8) {
+            log_dbg(5, "Received GOAWAY (%d): %.*s", ntohl(*(uint32_t *)(data + H2_HEADER_SIZE + 4)), (frm.f_len - 8), ((data + H2_HEADER_SIZE + 8)));
+        }
+        return -1;
+    } else if (frm.f_typ == RST_STREAM) {
         if (frm.f_len != 4) {
             conn->h2_error = FRAME_SIZE_ERROR;
             return -1;
@@ -1315,88 +1314,88 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
             return -1;
         } else if (strm == NULL || strm->h2_ss == SS_CLOSED) {
             if (frm.f_sid <= conn->h_sid) {
-    conn->h2_error = PROTOCOL_ERROR;
-              return -1;
+                conn->h2_error = PROTOCOL_ERROR;
+                return -1;
             }
         } else if (strm->h2_ss == SS_IDLE) {
-    conn->h2_error = PROTOCOL_ERROR;
-    return -1;
+            conn->h2_error = PROTOCOL_ERROR;
+            return -1;
         } else {
             log_dbg(5, "RST_STREAM: id %u, err %u", frm.f_sid, ntohl(*(uint32_t *)data));
-             strm->h2_ss = SS_CLOSED;
+            strm->h2_ss = SS_CLOSED;
         }
-  } else if (frm.f_typ == DATA) {
-  // return 0 because the rest of the processing needs to be done by the lua handler
-  return 0;
-  }
-  // done processing the frame
-  return 1;
+    } else if (frm.f_typ == DATA) {
+        // return 0 because the rest of the processing needs to be done by the lua handler
+        return 0;
+    }
+    // done processing the frame
+    return 1;
 }
 
 int
 http2_error(struct connection *conn, int code, uint32_t f_sid, char *buf, int len)
 {
-  uint8_t flags = 0;
+    uint8_t flags = 0;
     uint8_t f_typ;
-  char date[32];
+    char date[32];
     int offset = 0;
-  char *status;
-  char sc[4];
-  int w_len = 0;
-  int s_len = 0;
-  int f_len = 0;
-  char *enc_b;
-  size_t enc_l;
+    char *status;
+    char sc[4];
+    int w_len = 0;
+    int s_len = 0;
+    int f_len = 0;
+    char *enc_b;
+    size_t enc_l;
 
-  if (code == 0)
-  code = 500;
+    log_dbg(5, "%s: conn %p code %i f_sid %i buf %p len %i", __func__, conn, code, f_sid, buf, len);
 
-  log_dbg(5, "%s: conn %p code %i f_sid %i buf %p len %i", __func__, conn, code, f_sid, buf, len);
+    if (code == 0)
+        code = 500;
 
-  snprintf(sc, sizeof(sc), "%i", code);
+    snprintf(sc, sizeof(sc), "%i", code);
 
-  memset(buf, 0, (sizeof (uint8_t) * (H2_HEADER_SIZE + 4)));
-  conn->hpack_hbe = hpack_headerblock_new();
+    memset(buf, 0, (sizeof (uint8_t) * (H2_HEADER_SIZE + 4)));
+    conn->hpack_hbe = hpack_headerblock_new();
 
-  f_typ = HEADERS;
+    f_typ = HEADERS;
 
-  // add headers
-  if (hpack_header_add(conn->hpack_hbe, ":status", sc, 0) == NULL)
-  goto err;
-  if (hpack_header_add(conn->hpack_hbe, "software", SOFTWARE_NAME, 0) == NULL)
-  goto err;
-  if (hpack_header_add(conn->hpack_hbe, "date", httpd_time(date, sizeof date), 0) == NULL)
-  goto err;
-  if (hpack_header_add(conn->hpack_hbe, "content-type", "text/html; charset=UTF-8", 0) == NULL)
-    goto err;
+    // add headers
+    if (hpack_header_add(conn->hpack_hbe, ":status", sc, 0) == NULL)
+        goto err;
+    if (hpack_header_add(conn->hpack_hbe, "software", SOFTWARE_NAME, 0) == NULL)
+        goto err;
+    if (hpack_header_add(conn->hpack_hbe, "date", httpd_time(date, sizeof date), 0) == NULL)
+        goto err;
+    if (hpack_header_add(conn->hpack_hbe, "content-type", "text/html; charset=UTF-8", 0) == NULL)
+        goto err;
 
-  if ((enc_b = hpack_encode(conn->hpack_hbe, &enc_l, conn->hpack_enc)) == NULL) {
-  conn->h2_error = COMPRESSION_ERROR;
-  goto err;
-  }
+    if ((enc_b = hpack_encode(conn->hpack_hbe, &enc_l, conn->hpack_enc)) == NULL) {
+        conn->h2_error = COMPRESSION_ERROR;
+        goto err;
+    }
 
-  memcpy(buf + (sizeof(uint8_t) * H2_HEADER_SIZE + offset), enc_b, enc_l);
+    memcpy(buf + (sizeof(uint8_t) * H2_HEADER_SIZE + offset), enc_b, enc_l);
 
-  flags = FF_END_HEADERS;
-  pack_frame_header((uint8_t *)buf, enc_l + offset, flags, f_typ, conn->h_sid);
+    flags = FF_END_HEADERS;
+    pack_frame_header((uint8_t *)buf, enc_l + offset, flags, f_typ, conn->h_sid);
 
-  w_len += (H2_HEADER_SIZE + enc_l + offset);
+    w_len += (H2_HEADER_SIZE + enc_l + offset);
 
-  status = status_msg(code, &s_len);
-  f_len = snprintf((buf + w_len + H2_HEADER_SIZE), MIN(conn->h2_set.max_frame_size, (len - w_len - H2_HEADER_SIZE)), HTTP_BODY_T, status, status);
+    status = status_msg(code, &s_len);
+    f_len = snprintf((buf + w_len + H2_HEADER_SIZE), MIN(conn->h2_set.max_frame_size, (len - w_len - H2_HEADER_SIZE)), HTTP_BODY_T, status, status);
 
-  flags = FF_END_STREAM;
-  pack_frame_header((uint8_t *)(buf + w_len), f_len, flags, DATA, conn->h_sid);
-  w_len += (H2_HEADER_SIZE + f_len);
+    flags = FF_END_STREAM;
+    pack_frame_header((uint8_t *)(buf + w_len), f_len, flags, DATA, conn->h_sid);
+    w_len += (H2_HEADER_SIZE + f_len);
 
-  hpack_headerblock_free(conn->hpack_hbe);
+    hpack_headerblock_free(conn->hpack_hbe);
     return w_len;
 
 err:
-  // log if trying to write an error response fails and do nothing
-  log_dbg(5, "%s: (error writing error response)", __func__);
+    // log if trying to write an error response fails and do nothing
+    log_dbg(5, "%s: (error writing error response)", __func__);
     hpack_headerblock_free(conn->hpack_hbe);
-  return 0;
+    return 0;
 }
 
 int
@@ -1406,123 +1405,122 @@ http2_read(struct connection *conn, char *buf, int len)
     struct h2_frame frm;
     uint8_t pad = 0;
     int idx = 0;
-  int rv;
+    int rv;
 
-  log_dbg(5, "%s: buf %p len %i", __func__, buf, len);
+    log_dbg(5, "%s: buf %p len %i", __func__, buf, len);
 
-  // initial state, waiting HTTP/2 preface
+    // initial state, waiting HTTP/2 preface
     if (conn->h2_state == H2_WAITING_MAGIC) {
         if (len < CLIENT_MAGIC_LEN)
             goto again;
 
-  // check if we have a valid HTTP/2 preface
+        // check if we have a valid HTTP/2 preface
         if (memcmp(CLIENT_MAGIC, buf, CLIENT_MAGIC_LEN) != 0) {
-    conn->h2_error = PROTOCOL_ERROR;
-      goto error;
-  }
+            conn->h2_error = PROTOCOL_ERROR;
+            goto error;
+        }
 
-  // we got the preface, advance the index
-  idx += CLIENT_MAGIC_LEN;
-  conn->h2_state = H2_WAITING_SETTINGS;
+        // we got the preface, advance the index
+        idx += CLIENT_MAGIC_LEN;
+        conn->h2_state = H2_WAITING_SETTINGS;
     }
 
-  // this loops over the buffer and decodes/processes frame by frame
-  do {
-    // parse frame header
-  if (conn->f_len == 0) {
+    // this loops over the buffer and decodes/processes frame by frame
+    do {
+        // parse frame header
+        if (conn->f_len == 0) {
 
-        // do we have a full header
-        if ((idx + H2_HEADER_SIZE) > len)
-        goto again;
+            // do we have a full header
+            if ((idx + H2_HEADER_SIZE) > len)
+                goto again;
 
-      // decode frame header lengh settings
-        frm.f_len = (*(uint8_t*)&buf[idx] << 16) | (*(uint8_t*)&buf[idx + 1] << 8) | (*(uint8_t*)&buf[idx + 2]);
+            // decode frame header lengh settings
+            frm.f_len = (*(uint8_t*)&buf[idx] << 16) | (*(uint8_t*)&buf[idx + 1] << 8) | (*(uint8_t*)&buf[idx + 2]);
 
-      // do we have the full frame, now that we know its length
-      if ((idx + H2_HEADER_SIZE + frm.f_len) > len)
-      goto again;
+            // do we have the full frame, now that we know its length
+            if ((idx + H2_HEADER_SIZE + frm.f_len) > len)
+                goto again;
 
-      // decode remaining frame header settings
+            // decode remaining frame header settings
             frm.f_sid = (*(uint8_t*)&buf[idx + 5] << 24) | (*(uint8_t*)&buf[idx + 6] << 16) | (*(uint8_t*)&buf[idx + 7] << 8) | (*(uint8_t*)&buf[idx + 8]);
             frm.f_typ = *(uint8_t*)&buf[idx + 3];
             frm.f_flg = *(uint8_t*)&buf[idx + 4];
 
-      // if the http/2 state is waiting for settings, make sure we got the settings frame without the ack
-      if (conn->h2_state == H2_WAITING_SETTINGS) {
-  if ((frm.f_typ != SETTINGS) || (frm.f_flg & 1 != 0)) {
-  conn->h2_error = PROTOCOL_ERROR;
-      goto error;
-      // we got the settings frame we were waiting, change state to idle
-      } else
-      conn->h2_state = H2_IDLE;
-      }
+            // if the http/2 state is waiting for settings, make sure we got the settings frame without the ack
+            if (conn->h2_state == H2_WAITING_SETTINGS) {
+                if ((frm.f_typ != SETTINGS) || (frm.f_flg & 1 != 0)) {
+                    conn->h2_error = PROTOCOL_ERROR;
+                    goto error;
+                // we got the settings frame we were waiting, change state to idle
+                } else
+                    conn->h2_state = H2_IDLE;
+            }
 
-      // if we found the stream, check to see if we're expecting a continuation
-    if ((conn->cont_sid != 0) && ((conn->cont_sid != frm.f_sid) || (frm.f_typ != CONTINUATION))) {
-      conn->h2_error = PROTOCOL_ERROR;
-      goto error;
-      }
+            // if we found the stream, check to see if we're expecting a continuation
+            if ((conn->cont_sid != 0) && ((conn->cont_sid != frm.f_sid) || (frm.f_typ != CONTINUATION))) {
+                conn->h2_error = PROTOCOL_ERROR;
+                goto error;
+            }
 
-      // we're going to receive more than we can handle, send error to client
-        if (frm.f_len > h2_settings.max_frame_size) {
-  conn->h2_error = FRAME_SIZE_ERROR;
-  goto error;
-      }
+            // we're going to receive more than we can handle, send error to client
+            if (frm.f_len > h2_settings.max_frame_size) {
+                conn->h2_error = FRAME_SIZE_ERROR;
+                goto error;
+            }
 
-      // advance index, we got the header
-      idx += H2_HEADER_SIZE;
+            // advance index, we got the header
+            idx += H2_HEADER_SIZE;
 
-  // attempt to find a stream and check if frame is allowed in current state
-  rv = process_frame(conn, frm, buf + idx);
+            // attempt to find a stream and check if frame is allowed in current state
+            rv = process_frame(conn, frm, buf + idx);
 
-  // do we have an error while processing the frame
-  if (rv < 0)
-  goto error;
+            // do we have an error while processing the frame
+            if (rv < 0)
+                goto error;
 
-  // frame fully processed, check if we it's a control frame and need to reply or move on to the next one
-  if (rv == 1) {
-      idx += frm.f_len;
+            // frame fully processed, check if we it's a control frame and need to reply or move on to the next one
+            if (rv == 1) {
+                idx += frm.f_len;
 
-  if (conn->send_ping == 1)
-  break;
+                if (conn->send_ping == 1)
+                    break;
 
-  continue;
-  }
+                continue;
+            }
 
-  // note how much data remains to be processed
-  conn->f_len = frm.f_len;
-  }
+            // note how much data remains to be processed
+            conn->f_len = frm.f_len;
+        }
 
-  // if we don't have a valid stream here, it's an error
-  if (conn->strm == NULL) {
-    conn->h2_error = INTERNAL_ERROR;
-  goto error;
-  }
+        // if we don't have a valid stream here, it's an error
+        if (conn->strm == NULL) {
+            conn->h2_error = INTERNAL_ERROR;
+            goto error;
+        }
 
-  // read payload data from the conn buffer and pass it to lua
-  rv = lev_read(conn->strm, &buf[idx], conn->f_len);
+        // read payload data from the conn buffer and pass it to lua
+        rv = lev_read(conn->strm, &buf[idx], conn->f_len);
 
-  // advance the index
-  idx += rv;
+        // advance the index
+        idx += rv;
 
-  // if we have more to read, try again later
-  if ((conn->f_len -= rv) > 0) {
-      return idx;
-  }
+        // if we have more to read, try again later
+        if ((conn->f_len -= rv) > 0)
+            return idx;
 
-  // repeat and process another frame if we still have data in buffer
-  } while (idx < len);
+    // repeat and process another frame if we still have data in buffer
+    } while (idx < len);
 
 out:
-  conn->cs |= IO_SEND;
-  return idx;
+    conn->cs |= IO_SEND;
+    return idx;
 
 again:
     conn->cs |= IO_RECV;
     return idx;
 
 error:
-  conn->cs |= IO_SEND;
+    conn->cs |= IO_SEND;
     return len;
 }
 
@@ -1531,51 +1529,51 @@ int
 http_read(struct connection *conn, char *buf, int len)
 {
     struct stream* strm = conn->strm;
-  int idx = 0;
-  int rv;
+    int idx = 0;
+    int rv;
 
-  log_dbg(5, "%s: buf %p len %i", __func__, buf, len);
+    log_dbg(5, "%s: buf %p len %i", __func__, buf, len);
 
-  if (conn->strm == NULL) {
-    // atempt to start http/2 via alpn
-    if (conn->http_protocol == 0) {
-    char const* alpn;
+    if (conn->strm == NULL) {
+        // atempt to start http/2 via alpn
+        if (conn->http_protocol == 0) {
+            char const* alpn;
 
-    alpn = br_ssl_engine_get_selected_protocol(&conn->ssl_sc.eng);
-    if (alpn && (memcmp(proto_name, alpn, strlen(proto_name)) == 0)) {
-    if (h2_init(conn) < 0) {
-    conn->http_error = 500;
-      goto err;
-  }
-    return (http2_read(conn, buf, len));
+            alpn = br_ssl_engine_get_selected_protocol(&conn->ssl_sc.eng);
+            if (alpn && (memcmp(proto_name, alpn, strlen(proto_name)) == 0)) {
+                if (h2_init(conn) < 0) {
+                    conn->http_error = 500;
+                    goto err;
+                }
+                return (http2_read(conn, buf, len));
+            }
+            conn->http_protocol = HTTP11;
+        }
+
+        if ((idx = check_request(buf, len)) == 0) {
+            if (len > BUFFER_SIZE) {
+                conn->http_error = 400;
+                goto err;
+            }
+            goto again;
+        }
+
+        rv = parse_http(conn, buf, idx);
+
+        if (rv < 0)
+            goto err;
     }
-    conn->http_protocol = HTTP11;
-    }
 
-  if ((idx = check_request(buf, len)) == 0) {
-    if (len > BUFFER_SIZE) {
-    conn->http_error = 400;
-    goto err;
-    }
-    goto again;
-  }
+    idx += lev_read(conn->strm, (buf + idx), (len - idx));
 
-  rv = parse_http(conn, buf, idx);
-
-  if (rv < 0)
-  goto err;
-  }
-
-  idx += lev_read(conn->strm, (buf + idx), (len - idx));
-
-  return idx;
+    return idx;
 
 again:
     conn->cs = IO_RECV;
-  return 0;
+    return 0;
 
 err:
-  conn->cs = IO_SEND;
+    conn->cs = IO_SEND;
     return 0;
 }
 
@@ -1583,137 +1581,137 @@ err:
 int
 http_header(struct stream *strm, char *buf, int len)
 {
-  lua_State *T = strm->T;
-  char const* key;
-  char const* val;
-  int hlen = 0;
-  int slen = 0;
+    lua_State *T = strm->T;
+    char const* key;
+    char const* val;
+    int hlen = 0;
+    int slen = 0;
 
-  log_dbg(5, "%s: strm %p buf %p len %i", __func__, strm, buf, len);
+    log_dbg(5, "%s: strm %p buf %p len %i", __func__, strm, buf, len);
 
-  if (lua_type(T, 1) != LUA_TTABLE) {
-      log_dbg(5, "httpd.header: function argument not a lua table");
-  goto err;
-  }
-
-  lua_getfield(T, 1, "status");
-
-  if (lua_isnil(T, 2)) {
-  lua_pop(T, 1);
-        lua_getfield(T, 1, ":status");
-
-  if (lua_isnil(T, 2)) {
-  lua_pop(T, 1);
-  strm->conn->http_error = 500;
-  goto err;
-  }
-  }
-
-  val = luaL_checkstring(T, 2);
-  lua_pop(T, 1);
-
-  hlen = snprintf(buf, (len - hlen), "HTTP/1.1 %s\r\n", val);
-  if (hlen >= len)
-      goto err;
-
-    lua_pushnil(T);
-  while(lua_next(T, -2)) {
-  key = lua_tostring(T, -2);
-  val = lua_tostring(T, -1);
-  if (strcasecmp(key, "status") != 0)
-        hlen += snprintf(&buf[hlen], (len - hlen), "%s: %s\r\n", key, val);
-      lua_pop(T, 1);
-  if (hlen >= len)
-      goto err;
+    if (lua_type(T, 1) != LUA_TTABLE) {
+        log_dbg(5, "httpd.header: function argument not a lua table");
+        goto err;
     }
 
-  if (strm->http_method != POST) {
-      hlen += snprintf(&buf[hlen], (len - hlen), "\r\n");
+    lua_getfield(T, 1, "status");
 
-      if (hlen >= len)
+    if (lua_isnil(T, 2)) {
+        lua_pop(T, 1);
+        lua_getfield(T, 1, ":status");
+
+        if (lua_isnil(T, 2)) {
+            lua_pop(T, 1);
+            strm->conn->http_error = 500;
+            goto err;
+        }
+    }
+
+    val = luaL_checkstring(T, 2);
+    lua_pop(T, 1);
+
+    hlen = snprintf(buf, (len - hlen), "HTTP/1.1 %s\r\n", val);
+    if (hlen >= len)
         goto err;
-  }
-  strm->ss = IO_SEND;
-  strm->head = 0;
+
+    lua_pushnil(T);
+    while(lua_next(T, -2)) {
+        key = lua_tostring(T, -2);
+        val = lua_tostring(T, -1);
+        if (strnstr(key, "status", 6) == NULL)
+            hlen += snprintf(&buf[hlen], (len - hlen), "%s: %s\r\n", key, val);
+        lua_pop(T, 1);
+        if (hlen >= len)
+            goto err;
+    }
+
+    if (strm->http_method != POST) {
+        hlen += snprintf(&buf[hlen], (len - hlen), "\r\n");
+
+        if (hlen >= len)
+            goto err;
+    }
+    strm->ss = IO_SEND;
+    strm->head = 0;
 
     lua_settop(T, 0);
 
-  return hlen;
+    return hlen;
 
 err:
     strm->ss = IO_ERROR;
-  return 0;
+    return 0;
 }
 
 void
 conn_io(struct connection *conn)
 {
     struct thread *thr = conn->thr;
-  int sendrec = 0;
-  int recvrec = 0;
-  char *buf;
-  size_t len;
+    int sendrec = 0;
+    int recvrec = 0;
+    char *buf;
+    size_t len;
 
-  log_dbg(5, "%s: conn %p", __func__, conn);
+    log_dbg(5, "%s: conn %p", __func__, conn);
 
-  // this loop has two sections, setting up connection r/w events and getting app data in and out of the sll engine.
-  // it tries to execute all states of the ssl engine before it needs to return and wait for any connection events.
-  // once data is retrived or injected into the engine, it checks if any new events need to be added before it returns.
-  // in addition to ssl states, is also checks for various app states and returns as required
+    // this loop has two sections, setting up connection r/w events and getting app data in and out of the sll engine.
+    // it tries to execute all states of the ssl engine before it needs to return and wait for any connection events.
+    // once data is retrived or injected into the engine, it checks if any new events need to be added before it returns.
+    // in addition to ssl states, is also checks for various app states and returns as required
 
-  while (!(conn->cs & IO_ERROR)) {
+    while (!(conn->cs & IO_ERROR)) {
 
-      conn->ssl_state = br_ssl_engine_current_state(&conn->ssl_sc.eng);
+        conn->ssl_state = br_ssl_engine_current_state(&conn->ssl_sc.eng);
 
-  log_dbg(5, "sendrec %i recvrec %i conn->cs %i", sendrec, recvrec, conn->cs);
+        log_dbg(5, "sendrec %i recvrec %i conn->cs %i", sendrec, recvrec, conn->cs);
 
-  if (conn->ssl_state == BR_SSL_CLOSED)
-      break;
+        if (conn->ssl_state == BR_SSL_CLOSED)
+            break;
 
-  if ((conn->ssl_state & BR_SSL_SENDREC)) {
-  if (sendrec++ == 0)
-  EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_WRITE, conn_write, conn, 0);
+        if ((conn->ssl_state & BR_SSL_SENDREC))
+            if (sendrec++ == 0)
+                EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_WRITE, conn_write, conn, 0);
+
+        if ((conn->ssl_state & BR_SSL_RECVREC))
+            if (recvrec++ == 0)
+                EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_READ, conn_read, conn, 0);
+
+        if ((conn->cs == IO_CLOSE) && (sendrec == 0)) {
+            br_ssl_engine_close(&conn->ssl_sc.eng);
+            conntab_remove(conn);
+            return;
+        }
+
+        // exit and wait for the events we set up previousy
+        if ((sendrec > 1) || (recvrec > 1) || (conn->cs == 0))
+            return;
+
+        if ((conn->ssl_state & BR_SSL_RECVAPP) && (conn->cs & IO_RECV)) {
+            // remove the read flag and let the app side flag it again if needed
+            conn->cs ^= IO_RECV;
+            // update timer
+            conntab_update(conn);
+            // recv app data
+            app_recv(conn);
+        }
+
+        if ((conn->ssl_state & BR_SSL_SENDAPP) && (conn->cs & IO_SEND)) {
+            // remove the write flag and let the app side flag it again if needed
+            conn->cs ^= IO_SEND;
+            // update timer
+            conntab_update(conn);
+            // send app data
+            app_send(conn);
+        }
     }
 
-  if ((conn->ssl_state & BR_SSL_RECVREC)) {
-  if (recvrec++ == 0)
-  EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_READ, conn_read, conn, 0);
-  }
-
-  if ((conn->cs == IO_CLOSE) && (sendrec == 0)) {
-  br_ssl_engine_close(&conn->ssl_sc.eng);
-  conntab_remove(conn);
-  return;
-  }
-
-  // exit and wait for the events we set up previousy
-  if ((sendrec > 1) || (recvrec > 1) || (conn->cs == 0))
-    return;
-
-  if ((conn->ssl_state & BR_SSL_RECVAPP) && (conn->cs & IO_RECV)) {
-    conn->cs ^= IO_RECV;
-  // update timer
-  conntab_update(conn);
-  // recv app data
-  app_recv(conn);
-  }
-
-  if ((conn->ssl_state & BR_SSL_SENDAPP) && (conn->cs & IO_SEND)) {
-    conn->cs ^= IO_SEND;
-  // update timer
-  conntab_update(conn);
-  // send app data
-  app_send(conn);
-  }
-    }
-
-  if (conn->cs == IO_CLOSE)
-  br_ssl_engine_close(&conn->ssl_sc.eng);
-  // error condition, log and termintate connection
+    if (conn->cs == IO_CLOSE)
+        br_ssl_engine_close(&conn->ssl_sc.eng);
+    // error condition, log and termintate connection
     else
-      log_dbg(5, "%s: (SSL error: %d)", __func__, br_ssl_engine_last_error(&conn->ssl_sc.eng));
+        log_dbg(5, "%s: (SSL error: %d)", __func__, br_ssl_engine_last_error(&conn->ssl_sc.eng));
 
-  conntab_remove(conn);
+    conntab_remove(conn);
 }
 
 
@@ -1721,136 +1719,136 @@ conn_io(struct connection *conn)
 int
 http2_write(struct connection *conn, char **buf, int len)
 {
-  struct stream *strm;
-  struct stream *sp;
-  int w_len = 0;
-  int rv = 0;
+    struct stream *strm;
+    struct stream *sp;
+    int w_len = 0;
+    int rv = 0;
 
-  log_dbg(5, "%s: conn %p, buf %p len %i", __func__, conn, *buf, len);
-  // TODO: server settings/flow control
-  // we need to send the server h2_preface first (server settings) already assigned during h2_init
-  if (conn->h2_preface == 1) {
+    log_dbg(5, "%s: conn %p, buf %p len %i", __func__, conn, *buf, len);
+    // TODO: server settings/flow control
+    // we need to send the server h2_preface first (server settings) already assigned during h2_init
+    if (conn->h2_preface == 1) {
 
-    // check if the send buffer length is large enough for the header
-  if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-      goto again;
+        // check if the send buffer length is large enough for the header
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-  // create the server settings frame with our default values (NOT YET IMPLEMENTED)
-    pack_frame_header((uint8_t *)(*buf), 0, 0, SETTINGS, 0);
+        // create the server settings frame with our default values (NOT YET IMPLEMENTED)
+        pack_frame_header((uint8_t *)(*buf), 0, 0, SETTINGS, 0);
 
-  // signal we're done and advance length
-  conn->h2_preface = 0;
-    w_len += H2_HEADER_SIZE;
-  }
+        // flag we're done and advance length
+        conn->h2_preface = 0;
+        w_len += H2_HEADER_SIZE;
+    }
 
-  // we received the client settings frame, need to acknowledge it
-  if ((conn->send_settings == 1)) {
+    // we received the client settings frame, need to acknowledge it
+    if (conn->send_settings == 1) {
 
-  // check if the send buffer length is large enough for the header
-  if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-      goto again;
+        // check if the send buffer length is large enough for the header
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-  // create settings ack frame - 0 payload - and add it to the total length to send
-    pack_frame_header((uint8_t *)(*buf + w_len), 0, 1, SETTINGS, 0);
+        // create settings ack frame - 0 payload - and add it to the total length to send
+        pack_frame_header((uint8_t *)(*buf + w_len), 0, 1, SETTINGS, 0);
 
-  // signal we're done and advance length
-    conn->send_settings = 0;
-  w_len += H2_HEADER_SIZE;
-  }
+        // flag we're done and advance length
+        conn->send_settings = 0;
+        w_len += H2_HEADER_SIZE;
+    }
 
-  if (conn->send_ping == 1) {
+    if (conn->send_ping == 1) {
 
-    // check if the send buffer length is large enough for the header
-    if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-      goto again;
-    //return w_len;
+        // check if the send buffer length is large enough for the header
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-  // create settings ack frame - 0 payload - and add it to the total length to send
-  pack_frame_header((uint8_t *)(*buf + w_len), 8, 1, PING, 0);
-  memcpy((uint8_t *)(*buf + w_len + 9), conn->ping_data, 8);
+        // create settings ack frame - 0 payload - and add it to the total length to send
+        pack_frame_header((uint8_t *)(*buf + w_len), 8, 1, PING, 0);
+        memcpy((uint8_t *)(*buf + w_len + 9), conn->ping_data, 8);
 
-  // signal we're done and advance length
-  conn->send_ping = 0;
-  w_len += (H2_HEADER_SIZE + 8);
-  }
+        // flag we're done and advance length
+        conn->send_ping = 0;
+        w_len += (H2_HEADER_SIZE + 8);
+    }
 
-  if (conn->h2_error) {
-     // check if the send buffer length is large enough for the header
-    if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-    goto again;
+    if (conn->h2_error) {
+        // check if the send buffer length is large enough for the header
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-    w_len += http2_error(conn, conn->http_error, conn->h_sid, *buf + w_len, len);
-      // check if the send buffer length is large enough for the header
-      if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-          goto again;
+        w_len += http2_error(conn, conn->http_error, conn->h_sid, *buf + w_len, len);
+        // check if the send buffer length is large enough for the header
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-  pack_uint32((*buf + w_len + 9), conn->h_sid);
-  pack_uint32((*buf + w_len + 13), conn->h2_error);
+        pack_uint32((*buf + w_len + 9), conn->h_sid);
+        pack_uint32((*buf + w_len + 13), conn->h2_error);
 
-      pack_frame_header((uint8_t *)(*buf + w_len), 8, 0, GOAWAY, 0);
+        pack_frame_header((uint8_t *)(*buf + w_len), 8, 0, GOAWAY, 0);
 
-  w_len += (H2_HEADER_SIZE + 8);
-  conn->h2_error = 0;
-  goto err;
-  }
+        w_len += (H2_HEADER_SIZE + 8);
+        conn->h2_error = 0;
+        goto err;
+    }
 
-  // loop through streams and process as needed
-  TAILQ_FOREACH_SAFE(strm, &conn->strm_t, link, sp) {
-    conn->strm = strm;
-      uint8_t flags = 0;
-  int f_len = 0;
-  enum h2_frame_type f_typ = 0;
-  uint32_t h2_sid;
+    // loop through streams and process as needed
+    TAILQ_FOREACH_SAFE(strm, &conn->strm_t, link, sp) {
+        conn->strm = strm;
+        uint8_t flags = 0;
+        int f_len = 0;
+        enum h2_frame_type f_typ = 0;
+        uint32_t h2_sid;
 
-  if ((strm->ss == IO_NONE) || (strm->ss == IO_RECV))
-  continue;
+        if ((strm->ss == IO_NONE) || (strm->ss == IO_RECV))
+            continue;
 
-  // check if our buffer is large enough to write a "full" header frame
-  if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-      goto again;
+        // check if our buffer is large enough to write a "full" header frame
+        if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+            goto again;
 
-  if (strm->h2_ss == SS_CLOSED) {
-  strmtab_remove(strm);
-  continue;
-  }
+        if (strm->h2_ss == SS_CLOSED) {
+            strmtab_remove(strm);
+            continue;
+        }
 
-  if (strm->head == 1) {
-  rv = http2_header(strm, *buf + w_len, len);
+        if (strm->head == 1) {
+            rv = http2_header(strm, *buf + w_len, len);
 
-  if (rv <= 0) {
-  rv = http2_error(conn, strm->http_status, strm->h2_sid, *buf + w_len, len);
-  strm->h2_error = INTERNAL_ERROR;
-  strm->head = 0;
-  }
-  w_len += rv;
-  }
+            if (rv <= 0) {
+                rv = http2_error(conn, strm->http_status, strm->h2_sid, *buf + w_len, len);
+                strm->h2_error = INTERNAL_ERROR;
+                strm->head = 0;
+            }
+            w_len += rv;
+        }
 
-  if (strm->h2_error == NO_ERROR)  {
+        if (strm->h2_error == NO_ERROR)  {
 
-    f_len = lev_write(strm, *buf + w_len + H2_HEADER_SIZE, MIN(conn->h2_set.max_frame_size, (len - w_len - H2_HEADER_SIZE)));
-    h2_sid = strm->h2_sid;
+            f_len = lev_write(strm, *buf + w_len + H2_HEADER_SIZE, MIN(conn->h2_set.max_frame_size, (len - w_len - H2_HEADER_SIZE)));
+            h2_sid = strm->h2_sid;
 
-  if (strm->lua_status != LUA_YIELD) {
-  flags |= FF_END_STREAM;
-  strm->h2_ss = SS_HCLOSED_LOCAL;
-  strmtab_remove(strm);
-  }
+            if (strm->lua_status != LUA_YIELD) {
+                flags |= FF_END_STREAM;
+                strm->h2_ss = SS_HCLOSED_LOCAL;
+                strmtab_remove(strm);
+            }
 
-  pack_frame_header((uint8_t *)(*buf + w_len), f_len, flags, DATA, h2_sid);
-  w_len += (H2_HEADER_SIZE + f_len);
-  }
+            if (!((f_len == 0) && (strm->lua_status == 1))) {
+                pack_frame_header((uint8_t *)(*buf + w_len), f_len, flags, DATA, h2_sid);
+                w_len += (H2_HEADER_SIZE + f_len);
+            }
+        }
 
-  if (strm->h2_error != NO_ERROR) {
-    if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
-    goto again;
+        if (strm->h2_error != NO_ERROR) {
+            if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
+                goto again;
 
-    pack_uint32((*buf + w_len + 9), strm->h2_error);
-    pack_frame_header((uint8_t *)(*buf + w_len), 4, 0, RST_STREAM, strm->h2_sid);
-    strmtab_remove(strm);
+            pack_uint32((*buf + w_len + 9), strm->h2_error);
+            pack_frame_header((uint8_t *)(*buf + w_len), 4, 0, RST_STREAM, strm->h2_sid);
+            strmtab_remove(strm);
 
-    w_len += (H2_HEADER_SIZE + 4);
-  continue;
-  }
+            w_len += (H2_HEADER_SIZE + 4);
+        }
     }
 
 out:
@@ -1884,7 +1882,7 @@ http_error(enum http_protocol http_proto, int code, char *buf, int len)
     wlen += snprintf((buf + wlen), MAX(0, (len - wlen)), "Software: %s\r\n", SOFTWARE_NAME);
     wlen += snprintf((buf + wlen), MAX(0, (len - wlen)), "Date: %s\r\n", httpd_time(date, sizeof date));
     wlen += snprintf((buf + wlen), MAX(0, (len - wlen)), "Content-Type: %s\r\n", "text/html; charset=UTF-8");
-    wlen += snprintf((buf + wlen), MAX(0, (len - wlen)), "Content-Length: %d\r\n\r\n", strlen(HTTP_BODY_T) + 2 * (slen - 2));
+    wlen += snprintf((buf + wlen), MAX(0, (len - wlen)), "Content-Length: %lu\r\n\r\n", strlen(HTTP_BODY_T) + 2 * (slen - 2));
 
     wlen += snprintf((buf + wlen), (len - wlen), HTTP_BODY_T, status, status);
 
