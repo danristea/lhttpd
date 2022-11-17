@@ -765,7 +765,7 @@ hpack_encode_str(struct hbuf *buf, char *str)
 	 * to do this...
 	 */
 	slen = strlen(str);
-	if ((data = hpack_huffman_encode(str, slen, &len)) == NULL)
+	if ((data = hpack_huffman_encode((unsigned char	*)str, slen, &len)) == NULL)
 		goto done;
 	if (len > 0 && len < slen) {
 		DPRINTF("%s: encoded huffman code (size %ld, from %ld)",
@@ -779,7 +779,7 @@ hpack_encode_str(struct hbuf *buf, char *str)
 		if (hpack_encode_int(buf, slen, HPACK_M_LITERAL,
 		    HPACK_F_LITERAL) == -1)
 			goto done;
-		if (hbuf_writebuf(buf, str, slen) == -1)
+		if (hbuf_writebuf(buf, (unsigned char	*)str, slen) == -1)
 			goto done;
 	}
 
