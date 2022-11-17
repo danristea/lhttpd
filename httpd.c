@@ -400,7 +400,7 @@ http2_header(struct stream *strm, char *buf, int len)
     char const *key;
     char const *val;
     struct stream *pstrm = NULL;
-    char *enc_b;
+    unsigned char *enc_b;
     size_t enc_l;
 
     log_dbg(5, "%s: strm %p buf %p len %i", __func__, strm, buf, len);
@@ -657,11 +657,13 @@ conntab_remove(struct connection *conn)
 
     log_dbg(5, "%s: conn %p fd: %i", __func__, conn, conn->fd);
 
-    if (conn->ev.filter & EV_READ)
-        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
+    //if (conn->ev.filter & EV_READ)
+    //    EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_READ);
 
-    if (conn->ev.filter & EV_WRITE)
-        EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
+    //if (conn->ev.filter & EV_WRITE)
+    //    EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
+
+    conn->ev.filter = 0;
 
     close(conn->fd);
 
@@ -1041,7 +1043,7 @@ check_ss(struct stream *strm, enum h2_stream_state h2_ss, uint8_t f_typ)
 }
 
 int
-process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
+process_frame(struct connection *conn, struct h2_frame frm, char *data)
 {
     struct stream *strm = NULL;
     enum h2_stream_state h2_ss;
@@ -1202,7 +1204,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
         if ((conn->h_sid < frm.f_sid) && (frm.f_sid % 2 != 0))
             conn->h_sid = frm.f_sid;
 
-        if ((conn->hpack_hbd = hpack_decode(data, dec_len, conn->hpack_dec)) != NULL) {
+        if ((conn->hpack_hbd = hpack_decode((unsigned char *)data, dec_len, conn->hpack_dec)) != NULL) {
             struct hpack_header *hb;
             enum http_method http_method;
             char *auth = NULL;
@@ -1298,7 +1300,7 @@ process_frame(struct connection *conn, struct h2_frame frm, unsigned char *data)
         } else if ((frm.f_flg & 1) == 0) {
             // send_ping;
             conn->send_ping = 1;
-            conn->ping_data = data + H2_HEADER_SIZE;
+            conn->ping_data = (unsigned char *)(data + H2_HEADER_SIZE);
         }
     } else if (frm.f_typ == GOAWAY) {
         if (frm.f_len >= 8) {
@@ -1344,7 +1346,7 @@ http2_error(struct connection *conn, int code, uint32_t f_sid, char *buf, int le
     int w_len = 0;
     int s_len = 0;
     int f_len = 0;
-    char *enc_b;
+    unsigned char *enc_b;
     size_t enc_l;
 
     log_dbg(5, "%s: conn %p code %i f_sid %i buf %p len %i", __func__, conn, code, f_sid, buf, len);
@@ -1448,7 +1450,7 @@ http2_read(struct connection *conn, char *buf, int len)
 
             // if the http/2 state is waiting for settings, make sure we got the settings frame without the ack
             if (conn->h2_state == H2_WAITING_SETTINGS) {
-                if ((frm.f_typ != SETTINGS) || (frm.f_flg & 1 != 0)) {
+                if ((frm.f_typ != SETTINGS) || (frm.f_flg & 1)) {
                     conn->h2_error = PROTOCOL_ERROR;
                     goto error;
                 // we got the settings frame we were waiting, change state to idle
@@ -1781,8 +1783,8 @@ http2_write(struct connection *conn, char **buf, int len)
         if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
             goto again;
 
-        pack_uint32((*buf + w_len + 9), conn->h_sid);
-        pack_uint32((*buf + w_len + 13), conn->h2_error);
+        pack_uint32((uint8_t *)(*buf + w_len + 9), conn->h_sid);
+        pack_uint32((uint8_t *)(*buf + w_len + 13), conn->h2_error);
 
         pack_frame_header((uint8_t *)(*buf + w_len), 8, 0, GOAWAY, 0);
 
@@ -1843,7 +1845,7 @@ http2_write(struct connection *conn, char **buf, int len)
             if ((w_len + H2_HEADER_SIZE + BUFFER_SIZE) > len)
                 goto again;
 
-            pack_uint32((*buf + w_len + 9), strm->h2_error);
+            pack_uint32((uint8_t *)(*buf + w_len + 9), strm->h2_error);
             pack_frame_header((uint8_t *)(*buf + w_len), 4, 0, RST_STREAM, strm->h2_sid);
             strmtab_remove(strm);
 
@@ -1990,7 +1992,7 @@ app_send(struct connection *conn)
 
     log_dbg(5, "%s: conn %p", __func__, conn);
 
-    buf = br_ssl_engine_sendapp_buf(&conn->ssl_sc.eng, &len);
+    buf = (char *) br_ssl_engine_sendapp_buf(&conn->ssl_sc.eng, &len);
 
     if (len < BUFFER_SIZE)
         return;
