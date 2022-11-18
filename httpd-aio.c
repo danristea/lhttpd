@@ -101,12 +101,9 @@ schedule_aio(struct async_io *aio, struct aio_data *aio_d, short filter)
 void
 lh_aio_schedule(struct async_io *aio, void *ctx)
 {
-//    struct iocb* rlist[MAX_AIO];
-    struct iocb** rlist;
+    struct iocb* rlist[MAX_AIO];
     struct iocb* alist;
-    int rv;
 
-    rlist = malloc(MAX_AIO * sizeof(struct iocb *));
     memcpy(aio->alist, aio->nlist, sizeof(struct iocb) * MAX_AIO);
 
     alist = (struct iocb*) aio->alist;
@@ -114,15 +111,12 @@ lh_aio_schedule(struct async_io *aio, void *ctx)
     for (int i = 0; i < aio->nc; i++)
         rlist[i] = &((struct iocb *)aio->alist)[i];
 
-    struct iocb *acb_l = (struct iocb *)aio->alist;
+    aio->wait = 1;
 
-    aio->ac = aio->nc;
+    aio->ac = io_submit(aio->aid, aio->nc, rlist);
+    assert(aio->ac >= 0);
 
-    rv = io_submit(aio->aid, aio->ac, rlist);
-
-    assert(rv >= 0);
-
-    aio->nc -= rv;
+    aio->nc -= aio->ac;
 }
 
 int
@@ -131,15 +125,14 @@ lh_aio_reap(struct async_io *aio, struct aio_data **aio_d, int ac)
     struct iocb *acb;
     struct io_event io_e[MAX_AIO];
     struct timespec ts;
-
-    int r;
+    int rv;
 
     ts.tv_sec = 0;
     ts.tv_nsec = 0;
 
-    r = io_getevents(aio->aid, 1, MAX_AIO, io_e, &ts);
+    rv = io_getevents(aio->aid, 1, ac, io_e, &ts);
 
-    for (int i = 0 ; i < r; i++) {
+    for (int i = 0 ; i < rv; i++) {
 
         struct iocb* icb = (struct iocb*) io_e[i].obj;
 
@@ -147,11 +140,11 @@ lh_aio_reap(struct async_io *aio, struct aio_data **aio_d, int ac)
         aio_d[i]->pos += aio_d[i]->len;
     }
 
-    return r;
+    return rv;
 }
 
 #else
-// #elif _freebsd_ __MACH__
+// #elif _freebsd_ __APPLE__
 #include <aio.h>
 #include <sys/uio.h>
 
@@ -164,11 +157,11 @@ aio_init(int pipe[2]) {
     aio = (struct async_io *) calloc(1, sizeof(struct async_io));
     assert(aio);
 
-    aio->alist = (struct aiocb *) calloc(MAX_AIO, sizeof(struct aiocb));
-    aio->nlist = (struct aiocb *) calloc(MAX_AIO, sizeof(struct aiocb));
+    aio->alist = (struct aiocb *) calloc(MAX_LISTIO, sizeof(struct aiocb));
+    aio->nlist = (struct aiocb *) calloc(MAX_LISTIO, sizeof(struct aiocb));
 
-    memset(aio->alist, 0, sizeof(struct aiocb) * MAX_AIO);
-    memset(aio->nlist, 0, sizeof(struct aiocb) * MAX_AIO);
+    memset(aio->alist, 0, sizeof(struct aiocb) * MAX_LISTIO);
+    memset(aio->nlist, 0, sizeof(struct aiocb) * MAX_LISTIO);
 
     aio->ac = 0;
 
@@ -195,13 +188,15 @@ schedule_aio(struct async_io *aio, struct aio_data *aio_d, short filter)
 void
 lh_aio_schedule(struct async_io *aio, void *ctx)
 {
-    struct aiocb* rlist[MAX_AIO];
+    struct aiocb* rlist[MAX_LISTIO];
     struct aiocb* alist;
+    struct aiocb* nlist;
     struct sigevent se;
     int rv;
 
-    memcpy(aio->alist, aio->nlist, sizeof(struct aiocb) * MAX_AIO);
+    memcpy(aio->alist, aio->nlist, sizeof(struct aiocb) * MAX_LISTIO);
 
+    nlist = (struct aiocb*) aio->nlist;
     alist = (struct aiocb*) aio->alist;
 
     for (int i = 0; i < aio->nc; i++)
@@ -209,27 +204,34 @@ lh_aio_schedule(struct async_io *aio, void *ctx)
 
     struct aiocb *acb_l = (struct aiocb *)aio->alist;
 
-    aio->ac = aio->nc;
-
     memset(&se, 0, sizeof(struct sigevent));
 
     se.sigev_notify = SIGEV_SIGNAL;
     se.sigev_signo = SIGIO;
     se.sigev_value.sival_ptr = ctx;
 
-    rv = lio_listio(LIO_NOWAIT, rlist, aio->ac, &se);
+    aio->wait = 1;
 
-    if (rv < 0) {
-        errno = 0;
-        for (int i = 0; i < aio->ac; i++)  {
-          int x = aio_error(&acb_l[i]);
-          fprintf(stderr, "\nrv: %i, error: %s\n", x, (x > 0)? strerror(x): "-");
+    rv = lio_listio(LIO_NOWAIT, rlist, aio->nc, &se);
+    
+    if (rv != 0) {
+        int x = 0;
+        aio->ac = 0;
+        for (int i = 0; i < aio->nc; i++)  {
+            rv = aio_error(&acb_l[i]);
+
+            if ((rv == 0) || (rv == EINPROGRESS))
+                aio->ac++;
+            else {
+                memmove(nlist + x, nlist + i, sizeof(struct aiocb) * (aio->nc - i));
+                aio->nlist = nlist;
+                x++;
+            }
         }
-    }
+    } else
+        aio->ac = aio->nc;
 
-    assert(rv == 0);
-
-    aio->nc = 0;
+    aio->nc -= aio->ac;
 }
 
 int
@@ -240,17 +242,16 @@ lh_aio_reap(struct async_io *aio, struct aio_data **aio_d, int ac)
     int rv;
 
     for (int i = 0; i < ac; i++) {
+        aio_d[i] = acb[i].aio_sigevent.sigev_value.sival_ptr;
         if (aio_error(&acb[i]) == 0) {
             rv = aio_return(&acb[i]);
             assert(rv >= 0);
-            aio_d[i] = acb[i].aio_sigevent.sigev_value.sival_ptr;
             aio_d[i]->pos += rv;
-
         // some error
         } else
             aio_d[i]->len = -1;
     }
+
     return ac;
 }
-
 #endif
