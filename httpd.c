@@ -741,21 +741,21 @@ thread_wakeup(struct edata *ev)
     int ac = thr->aio->ac;
     char c;
     int id = -1;
-    uint64_t eval = 0;
+    uint64_t ne = 0;
     int rv;
 
     log_dbg(5, "%s: ev %p", __func__, ev);
 
     if (ev->filter != 0) {
-        rv = read(ev->fd, &eval, sizeof(eval));
-        if (rv != sizeof (eval)) {
+        rv = read(ev->fd, &ne, sizeof(ne));
+        if (rv != sizeof (ne)) {
             log_dbg(2, "%s: thread signaling error", __func__);
             // should we terminate?
             return;
         }
     }
 
-    if ((thr->aio->wait == 1) && (eval > 0)) {
+    if ((thr->aio->wait == 1) && (ne > 0)) {
         while (ac > 0) {
             struct aio_data *aio_d[MAX_AIO];
 
@@ -777,7 +777,7 @@ thread_wakeup(struct edata *ev)
             thr->aio->ac = ac;
         }
     }
-    thr->aio->wait = 0;
+//    thr->aio->wait = 0;
 }
 
 void *
@@ -795,10 +795,8 @@ serve(void *thread) {
 
         EQ_POLL(eq, (conn ? (srv->timeout* 1000 - ((eq->tv - conn->timestamp)/1000000)): -1));
 
-        if ((thr->aio->nc > 0) && (thr->aio->wait == 0)) {
+        if ((thr->aio->nc > 0) && (thr->aio->wait == 0))
             lh_aio_schedule(thr->aio, thread);
-            thr->aio->wait = 1;
-        }
 
         while ((conn = TAILQ_FIRST(&thr->conn_t)) && ((eq->tv - (long)(srv->timeout*1000000000)) >= conn->timestamp))
             conntab_remove(conn);
