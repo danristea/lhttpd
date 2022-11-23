@@ -41,6 +41,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #define INIT_HB_BUF_SIZE (1 << 13)
 
+extern struct async_io **aio;
+
 static const char* http_protocols[] = HTTP_PROTOCOLS;
 const char *proto_name = "h2";
 
@@ -63,25 +65,32 @@ void conn_write(struct edata *ev);
 void app_send(struct connection *conn);
 void app_recv(struct connection *conn);
 
-
-// get sockaddr, IPv4 or IPv6:
-void *
-get_in_addr(struct sockaddr *sa)
+static void
+sig_sigaction(int signo, siginfo_t *info, void *ctx)
 {
-    if (sa->sa_family == AF_INET)
-        return &(((struct sockaddr_in *)sa)->sin_addr);
+    struct thread *thr = (struct thread *) (info->si_value.sival_ptr);
+    uint64_t eval = 1;
 
-    return &(((struct sockaddr_in6 *)sa)->sin6_addr);
-}
+    log_dbg(5, "########## ->>>>> ctx %p thr %p", ctx, thr);
 
+#ifndef __APPLE__
+    assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
+#else
+    for (short i = 0; i < NCPU; i++) {
+        fprintf(stderr, "\nCALLING ADDRESS %p     wait is %i     nc %i ac %i", aio[i], aio[i]->wait, aio[i]->nc, aio[i]->ac);
+        if (aio[i]->wait == 1) {
+//        if (aio[i]->ac > 0) {
+//          if ((aio[i]->wait == 1) || ((aio[i]->ac == aio[i]->nc) && (aio[i]->ac > 0))) {
+//          if ((aio[i]->wait == 1) && (aio[i]->ac > 0)) {
+            //if (aio_return(aio[i]->alist) >= 0) {
+                struct thread *thr = (struct thread *) aio[i]->thr;
+                assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
+                log_dbg(5, "wrote on thr thr %p", thr);
 
-unsigned short int
-get_in_port(struct sockaddr *sa)
-{
-    if (sa->sa_family == AF_INET)
-        return ((struct sockaddr_in *)sa)->sin_port;
-
-    return ((struct sockaddr_in6*)sa)->sin6_port;
+            //}
+        }
+    }
+#endif
 }
 
 char *
@@ -299,7 +308,7 @@ start_lua(struct connection *conn, struct L_map *L_map, char *path)
     }
 
     // loop through lua map states
-    SIMPLEQ_FOREACH(Lm, L_map, next) {
+    SIMPLEQ_FOREACH(Lm, L_map, link) {
 
         if ((strncmp(prefix, Lm->prefix, len)) || (len != strlen(Lm->prefix)))
             continue;
@@ -700,7 +709,7 @@ conntab_create(struct edata *ev)
     // new connection event fired, ream in a different thread and signal it via pipe
     if (NCPU > 1) {
 
-        if ((srv->ti +=1) >= NCPU)
+        if ((srv->ti += 1) >= NCPU)
             srv->ti = 0;
 
         EQ_ADD(srv->thr[srv->ti].eq, &srv->thr[srv->ti].ev[0], srv->fd, EV_READ, conntab_create, &srv->thr[srv->ti], 1);
@@ -733,81 +742,7 @@ conntab_create(struct edata *ev)
 }
 
 
-void
-thread_wakeup(struct edata *ev)
-{
-    struct thread *thr = (struct thread *) ev->ctx;
-    struct server *srv = thr->srv;
-    int ac = thr->aio->ac;
-    char c;
-    int id = -1;
-    uint64_t ne = 0;
-    int rv;
 
-    log_dbg(5, "%s: ev %p", __func__, ev);
-
-    if (ev->filter != 0) {
-        rv = read(ev->fd, &ne, sizeof(ne));
-        if (rv != sizeof (ne)) {
-            log_dbg(2, "%s: thread signaling error", __func__);
-            // should we terminate?
-            return;
-        }
-    }
-
-    if ((thr->aio->wait == 1) && (ne > 0)) {
-        while (ac > 0) {
-            struct aio_data *aio_d[MAX_AIO];
-
-            thr->aio->wait = 0;
-            int n = thr->aio->ac;
-            thr->aio->ac = 0;
-
-            int r;
-
-            r = lh_aio_reap(thr->aio, aio_d, ac);
-
-            if (r <= 0)
-                break;
-
-            for (int i = 0; i < r; i++)
-                lh_aio_dispatch(aio_d[i]);
-
-            ac -= r;
-            thr->aio->ac = ac;
-        }
-    }
-//    thr->aio->wait = 0;
-}
-
-void *
-serve(void *thread) {
-
-    struct thread *thr = (struct thread *) thread;
-    struct server *srv = thr->srv;
-    struct equeue *eq = thr->eq;
-    struct connection *conn;
-
-    log_dbg(5, "%s: thread %p", __func__, thr);
-
-    for (;;) {
-        conn = TAILQ_FIRST(&thr->conn_t);
-
-        EQ_POLL(eq, (conn ? (srv->timeout* 1000 - ((eq->tv - conn->timestamp)/1000000)): -1));
-
-        if ((thr->aio->nc > 0) && (thr->aio->wait == 0))
-            lh_aio_schedule(thr->aio, thread);
-
-        while ((conn = TAILQ_FIRST(&thr->conn_t)) && ((eq->tv - (long)(srv->timeout*1000000000)) >= conn->timestamp))
-            conntab_remove(conn);
-
-        if (((conn = TAILQ_LAST(&thr->conn_t, conn)) == NULL) || (conn->fd != -1)) {
-            if ((new_conn(thr)) < 0)
-                log_ex(srv, 1, "%s: (error preallocating connection: %s)", __func__, strerror(errno));
-        }
-    }
-    return NULL;
-}
 
 int
 parse_http(struct connection *conn, char *buf, int len)
@@ -1647,6 +1582,7 @@ void
 conn_io(struct connection *conn)
 {
     struct thread *thr = conn->thr;
+    unsigned ssl_state;
     int sendrec = 0;
     int recvrec = 0;
     char *buf;
@@ -1661,18 +1597,18 @@ conn_io(struct connection *conn)
 
     while (!(conn->cs & IO_ERROR)) {
 
-        conn->ssl_state = br_ssl_engine_current_state(&conn->ssl_sc.eng);
+        ssl_state = br_ssl_engine_current_state(&conn->ssl_sc.eng);
 
         log_dbg(5, "sendrec %i recvrec %i conn->cs %i", sendrec, recvrec, conn->cs);
 
-        if (conn->ssl_state == BR_SSL_CLOSED)
+        if (ssl_state == BR_SSL_CLOSED)
             break;
 
-        if ((conn->ssl_state & BR_SSL_SENDREC))
+        if ((ssl_state & BR_SSL_SENDREC))
             if (sendrec++ == 0)
                 EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_WRITE, conn_write, conn, 0);
 
-        if ((conn->ssl_state & BR_SSL_RECVREC))
+        if ((ssl_state & BR_SSL_RECVREC))
             if (recvrec++ == 0)
                 EQ_ADD(thr->eq, &conn->ev, conn->fd, EV_READ, conn_read, conn, 0);
 
@@ -1686,7 +1622,7 @@ conn_io(struct connection *conn)
         if ((sendrec > 1) || (recvrec > 1) || (conn->cs == 0))
             return;
 
-        if ((conn->ssl_state & BR_SSL_RECVAPP) && (conn->cs & IO_RECV)) {
+        if ((ssl_state & BR_SSL_RECVAPP) && (conn->cs & IO_RECV)) {
             // remove the read flag and let the app side flag it again if needed
             conn->cs ^= IO_RECV;
             // update timer
@@ -1695,7 +1631,7 @@ conn_io(struct connection *conn)
             app_recv(conn);
         }
 
-        if ((conn->ssl_state & BR_SSL_SENDAPP) && (conn->cs & IO_SEND)) {
+        if ((ssl_state & BR_SSL_SENDAPP) && (conn->cs & IO_SEND)) {
             // remove the write flag and let the app side flag it again if needed
             conn->cs ^= IO_SEND;
             // update timer
