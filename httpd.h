@@ -81,7 +81,7 @@ enum io_state {
 typedef struct lua_map {
     const char 	*script;
     const char	*prefix;
-    SIMPLEQ_ENTRY(lua_map) next;
+    SIMPLEQ_ENTRY(lua_map) link;
 } lua_map;
 
 typedef struct config {
@@ -90,9 +90,6 @@ typedef struct config {
     char *addr;
     char *user;
     char *rootdir;
-    char *lua_prefix;
-    char *lua_script;
-    void *tls_config;
     char *cert_file;
     char *pkey_file;
     int debug;
@@ -127,7 +124,7 @@ struct frame_settings {
 typedef struct lua_handler {
     const char	*name;
     int		 ref;
-    SIMPLEQ_ENTRY(lua_handler) next;
+    SIMPLEQ_ENTRY(lua_handler) link;
 } lua_handler;
 
 typedef struct lua_state_map {
@@ -135,7 +132,7 @@ typedef struct lua_state_map {
     const char	*prefix;
     lua_State	*L;
     SIMPLEQ_HEAD(l_hand, lua_handler) l_hand;
-    SIMPLEQ_ENTRY(lua_state_map) next;
+    SIMPLEQ_ENTRY(lua_state_map) link;
 } lua_state_map;
 
 
@@ -163,6 +160,7 @@ typedef struct stream {
     int h2_wgt;
     int h2_flg;
     int window_size;
+    int prom_init;
 
     char *method;     //:method (HTTP/2)
     char *scheme;     //:scheme (HTTP/2)
@@ -192,10 +190,10 @@ struct server {
     struct edata ev;
     int fd;
     int ti;
+    int err;
     uintptr_t aid; // fd or signal for aio signaling
     struct sockaddr_storage ss;
     char *progname;
-    char *pidfile;
     struct config *conf;
     long timeout;
     struct thread *thr;
@@ -228,14 +226,13 @@ typedef struct connection {
     int conn_close;
     int upgrade;
 
-    char* buf;
+    unsigned char* buf;
     char rbuf[BUFFER_SIZE];
     size_t rlen;
 
     // ssl
     br_ssl_server_context ssl_sc;
     br_sslio_context ssl_ioc;
-    unsigned ssl_state; //might not be necessary depending on implementation
 
     // HTTP/2
     struct h2_frame h2_frm;
@@ -256,7 +253,7 @@ typedef struct connection {
     int f_len;
     int send_settings;
     int send_ping;
-    char* ping_data;
+    unsigned char* ping_data;
 
     int h2_preface;
     int hs;
@@ -294,13 +291,22 @@ void lh_aio_dispatch(struct aio_data *aio_d);
 void thread_wakeup(struct edata *ev);
 
 //httpd.c
+static void sig_sigaction(int signo, siginfo_t *info, void *ctx);
 char* e_strdup(const char* oldstr);
 void* serve(void *thread);
 int new_conn(struct thread* thr);
 void conntab_create(struct edata *ev);
+void conntab_remove(struct connection *conn);
 void conn_io(struct connection *conn);
 
 static long ts_to_tv(struct timespec* ts);
 struct timespec tv_to_ts(unsigned long tv);
+
+// server.c
+void *get_in_addr(struct sockaddr *sa);
+unsigned short int get_in_port(struct sockaddr *sa);
+void init_run(struct server *srv);
+void cleanup(struct server *srv);
+void signal_shutdown(struct server *srv);
 
 #endif
