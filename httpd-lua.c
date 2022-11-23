@@ -123,7 +123,7 @@ find_handler(struct lua_state_map* Lm, char* name, char* query)
         len = strlen(name);
 
     // loop thourh handlers
-    SIMPLEQ_FOREACH(lh, &Lm->l_hand, next) {
+    SIMPLEQ_FOREACH(lh, &Lm->l_hand, link) {
         if (strncmp(lh->name, name, len) || (len != strlen(lh->name)))
             continue;
 
@@ -643,7 +643,7 @@ lua_map_create(struct thread *thr, struct l_map *l_map)
 
     log_dbg(5, "%s: thr %p l_map %p", __func__, thr, l_map);
 
-    SIMPLEQ_FOREACH(lm, l_map, next) {
+    SIMPLEQ_FOREACH(lm, l_map, link) {
         struct lua_state_map *Lm;
 
         if ((access(lm->script, F_OK) < 0))
@@ -696,7 +696,7 @@ lua_map_create(struct thread *thr, struct l_map *l_map)
             return -1;
         }
 
-        SIMPLEQ_INSERT_TAIL(&thr->L_map, Lm, next);
+        SIMPLEQ_INSERT_TAIL(&thr->L_map, Lm, link);
     }
 
     return 0;
@@ -727,7 +727,7 @@ register_handler(lua_State *L)
     lh->name = e_strdup(lua_tostring(L, 1));
     lh->ref = luaL_ref(L, LUA_REGISTRYINDEX);
 
-    SIMPLEQ_INSERT_TAIL(&Lm->l_hand, lh, next);
+    SIMPLEQ_INSERT_TAIL(&Lm->l_hand, lh, link);
 
     return 0;
 }
@@ -753,6 +753,10 @@ lh_aio_dispatch(struct aio_data *aio_d)
         strm->h2_error = INTERNAL_ERROR;
         lua_pushnil(strm->T);
     } else if (aio_d->buf != NULL) {
+
+        log_dbg(5, "len %i", aio_d->len);
+        log_dbg(5, "buf %s", aio_d->buf);
+
         if (rv == 0)
             lua_pushnil(strm->T);
         else
