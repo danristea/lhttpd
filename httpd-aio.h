@@ -54,10 +54,11 @@ struct async_io {
     int ready;
     void *nlist;
     void *alist;
+    void *thr;
 };
 
-struct async_io *aio_init(int pipe[2]);
 
+struct async_io *aio_init(int pipe[2]);
 void schedule_aio(struct async_io *, struct aio_data *, short);
 void lh_aio_schedule(struct async_io *, void *);
 int lh_aio_reap(struct async_io *, struct aio_data **, int);
