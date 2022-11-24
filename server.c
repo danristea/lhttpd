@@ -29,6 +29,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <pwd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <grp.h>
+#include <sys/types.h>
 
 #include "httpd.h"
 
