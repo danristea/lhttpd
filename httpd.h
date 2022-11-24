@@ -291,7 +291,6 @@ void lh_aio_dispatch(struct aio_data *aio_d);
 void thread_wakeup(struct edata *ev);
 
 //httpd.c
-static void sig_sigaction(int signo, siginfo_t *info, void *ctx);
 char* e_strdup(const char* oldstr);
 void* serve(void *thread);
 int new_conn(struct thread* thr);
