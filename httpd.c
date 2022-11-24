@@ -65,33 +65,6 @@ void conn_write(struct edata *ev);
 void app_send(struct connection *conn);
 void app_recv(struct connection *conn);
 
-static void
-sig_sigaction(int signo, siginfo_t *info, void *ctx)
-{
-    struct thread *thr = (struct thread *) (info->si_value.sival_ptr);
-    uint64_t eval = 1;
-
-    log_dbg(5, "########## ->>>>> ctx %p thr %p", ctx, thr);
-
-#ifndef __APPLE__
-    assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
-#else
-    for (short i = 0; i < NCPU; i++) {
-        fprintf(stderr, "\nCALLING ADDRESS %p     wait is %i     nc %i ac %i", aio[i], aio[i]->wait, aio[i]->nc, aio[i]->ac);
-        if (aio[i]->wait == 1) {
-//        if (aio[i]->ac > 0) {
-//          if ((aio[i]->wait == 1) || ((aio[i]->ac == aio[i]->nc) && (aio[i]->ac > 0))) {
-//          if ((aio[i]->wait == 1) && (aio[i]->ac > 0)) {
-            //if (aio_return(aio[i]->alist) >= 0) {
-                struct thread *thr = (struct thread *) aio[i]->thr;
-                assert(write(thr->pfd[1], &eval, sizeof(eval)) == sizeof (eval));
-                log_dbg(5, "wrote on thr thr %p", thr);
-
-            //}
-        }
-    }
-#endif
-}
 
 char *
 strnstr(const char *s, const char *find, size_t slen)
