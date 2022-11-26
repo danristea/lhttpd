@@ -245,6 +245,7 @@ lh_aio_reap(struct async_io *aio, struct aio_data **aio_d, int ac)
 
     for (int i = 0; i < ac; i++) {
         aio_d[i] = acb[i].aio_sigevent.sigev_value.sival_ptr;
+
         if (aio_error(&acb[i]) == 0) {
             rv = aio_return(&acb[i]);
             assert(rv >= 0);
