@@ -42,7 +42,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 // some system globals
-#define NCPU  (sysconf(_SC_NPROCESSORS_ONLN))
+#define NCPU (sysconf(_SC_NPROCESSORS_ONLN))
 #define MAX_KEV ((sysconf(_SC_OPEN_MAX)) * 2)
 
 enum EV_FILTER {EV_SIGNAL = (0), EV_READ = (1) , EV_WRITE = (2)};
@@ -66,9 +66,9 @@ struct equeue {
 
 
 struct equeue *equeue_init();
-void equeue_add(struct equeue*, struct edata*, int, short, void*, void*, short);
-void equeue_del(struct equeue*, struct edata*, int, short);
-void equeue_poll(struct equeue*, int);
+void equeue_add(struct equeue *, struct edata *, int, short, void *, void *, short);
+void equeue_del(struct equeue *, struct edata *, int, short);
+void equeue_poll(struct equeue *, int);
 
 #define EQ_INIT() equeue_init()
 #define EQ_ADD(eq, ev, fd, filter, cb, ctx, once) equeue_add(eq, ev, fd, filter, cb, ctx, once)
