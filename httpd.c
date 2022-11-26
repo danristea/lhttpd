@@ -29,17 +29,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <fcntl.h>
 #include <ctype.h>
 #include <dirent.h>
-#include <sys/stat.h>
 
 #include "httpd.h"
+
 
 #if !(SERVER_RSA || SERVER_EC || SERVER_MIXED)
 #define SERVER_RSA     1
 #define SERVER_EC      0
 #define SERVER_MIXED   0
 #endif
-
-#define INIT_HB_BUF_SIZE (1 << 13)
 
 extern struct async_io **aio;
 
@@ -61,7 +59,6 @@ static void strdecode(char *str);
 void conn_io(struct connection *conn);
 void conn_read(struct edata *ev);
 void conn_write(struct edata *ev);
-
 void app_send(struct connection *conn);
 void app_recv(struct connection *conn);
 
@@ -176,14 +173,10 @@ void
 strmtab_remove(struct stream *strm)
 {
     struct connection *conn = strm->conn;
+    lua_State *L = strm->L;
     struct stream *sp;
-    lua_State *L;
-    lua_State *T;
 
     log_dbg(5, "%s: strm %p", __func__, strm);
-
-    L = strm->L;
-    T = strm->T;
 
     strm->ss = 0;
     TAILQ_REMOVE(&conn->strm_t, strm, link);
@@ -633,6 +626,7 @@ conntab_remove(struct connection *conn)
 {
     struct thread *thr = conn->thr;
     struct lua_state_map *Lmap;
+    struct stream *strm, *sp;
 
     if (conn == NULL)
         return;
@@ -644,6 +638,9 @@ conntab_remove(struct connection *conn)
 
     //if (conn->ev.filter & EV_WRITE)
     //    EQ_DEL(conn->thr->eq, &conn->ev, conn->fd, EV_WRITE);
+
+    //TAILQ_FOREACH_SAFE(strm, &conn->strm_t, link, sp)
+    //    strmtab_remove(strm);
 
     conn->ev.filter = 0;
 
@@ -713,9 +710,6 @@ conntab_create(struct edata *ev)
 
     return conn_io(conn);
 }
-
-
-
 
 int
 parse_http(struct connection *conn, char *buf, int len)
