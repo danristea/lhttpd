@@ -29,14 +29,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define _GNU_SOURCE
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include "lualib.h"
 #include "lauxlib.h"
 
 #include "httpd.h"
-
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 
 static void
@@ -86,15 +83,15 @@ lh_setupval(lua_State *L)
     lua_pop(L, 1);
 }
 
-void*
+void *
 lh_getupval(lua_State *L)
 {
-    void* val;
+    void *val;
 
     lua_pushvalue(L, lua_upvalueindex(1));
     lua_insert(L, -2);
     lua_rawget(L, -2);
-    val = (void*) lua_touserdata(L, -1);
+    val = (void *) lua_touserdata(L, -1);
     lua_pop(L, 2);
 
     return val;
@@ -112,9 +109,9 @@ lua_run(lua_State *T, lua_State *L, int n)
 }
 
 struct lua_handler *
-find_handler(struct lua_state_map* Lm, char* name, char* query)
+find_handler(struct lua_state_map *Lm, char *name, char *query)
 {
-    struct lua_handler* lh;
+    struct lua_handler *lh;
     int len;
 
     if (query)
@@ -153,7 +150,6 @@ strm_resume(struct stream *strm)
         return conn_io(conn);
     }
 }
-
 
 // read data from recv buffer into lua
 // returns how much was read by lua
@@ -315,53 +311,6 @@ strm_write(struct edata *ev)
     EQ_DEL(conn->thr->eq, ev, ev->fd, EV_WRITE);
 
     return strm_resume(strm);
-}
-
-void stack_dump(lua_State *L, const char *stackname) {
-  int i;
-  int top = lua_gettop(L);
-  printf("--------------- %s STACK ---------------\n", stackname);
-  for (i = top; i >= 1; i--) {
-    int t = lua_type(L, i);
-    printf("[%2d - %8s] : ", i, lua_typename(L, t));
-    switch (t) {
-      case LUA_TSTRING:
-        printf("%s", lua_tostring(L, i));
-        break;
-      case LUA_TBOOLEAN:
-        printf(lua_toboolean(L, i) ? "true" : "false");
-        break;
-      case LUA_TNUMBER:
-        printf("%g", lua_tonumber(L, i));
-        break;
-      case LUA_TNIL:
-        printf("nil");
-        break;
-      case LUA_TNONE:
-        printf("none");
-        break;
-      case LUA_TFUNCTION:
-        printf("<function %p>", lua_topointer(L, i));
-        break;
-      case LUA_TTABLE:
-        printf("<table %p>", lua_topointer(L, i));
-        break;
-      case LUA_TTHREAD:
-        printf("<thread %p>", lua_topointer(L, i));
-        break;
-      case LUA_TUSERDATA:
-        printf("<userdata %p>", lua_topointer(L, i));
-        break;
-      case LUA_TLIGHTUSERDATA:
-        printf("<lightuserdata %p>", lua_topointer(L, i));
-        break;
-      default:
-        printf("unknown %s", lua_typename(L, t));
-        break;
-    }
-    printf("\n");
-  }
-  printf("--------------- %s STACK ---------------\n", stackname);
 }
 
 static int
@@ -680,12 +629,6 @@ lua_map_create(struct thread *thr, struct l_map *l_map)
         lua_setmetatable(Lm->L, -2);
         lua_setfield(Lm->L, LUA_REGISTRYINDEX, "httpd.data");
 
-//        luaL_getmetatable(Lm->L, LUA_FILEHANDLE);
-//        lua_pushcclosure(L, cleanup_fn, 1);
-//        lua_pushcfunction(Lm->L, cleanup_fn);
-//        lua_setfield(Lm->L, -2, "__gc");
-//        lua_setmetatable(Lm->L, -2);
-
         if (luaL_loadfile(Lm->L, lm->script)) {
             log_dbg(5, "failed to load script %s: %s", lm->script, lua_tostring(Lm->L, -1));
             return -1;
@@ -708,7 +651,6 @@ register_handler(lua_State *L)
 {
     struct lua_state_map *Lm;
     struct lua_handler *lh;
-    struct thread *thr;
 
     log_dbg(5, "%s: L %p", __func__, L);
 
@@ -753,10 +695,6 @@ lh_aio_dispatch(struct aio_data *aio_d)
         strm->h2_error = INTERNAL_ERROR;
         lua_pushnil(strm->T);
     } else if (aio_d->buf != NULL) {
-
-        log_dbg(5, "len %i", aio_d->len);
-        log_dbg(5, "buf %s", aio_d->buf);
-
         if (rv == 0)
             lua_pushnil(strm->T);
         else
