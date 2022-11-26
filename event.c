@@ -26,14 +26,11 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#include <signal.h>
-
 #include "event.h"
 
 extern void get_monotonic_time(struct timespec *ts);
-static long ts_to_tv(struct timespec *ts);
-struct timespec tv_to_ts(unsigned long tv);
-
+extern long ts_to_tv(struct timespec *ts);
+extern struct timespec tv_to_ts(unsigned long tv);
 
 // kqueue (bsd) specific event system code
 #ifdef HAVE_SYS_EVENT_H
@@ -271,17 +268,3 @@ equeue_poll(struct equeue *eq, int tv)
 }
 
 #endif
-
-/////////////////////////////////////////////////////////////////////////////////////////
-
-static long
-ts_to_tv(struct timespec *ts)
-{
-    return (long)ts->tv_sec * 1000000000L + ts->tv_nsec;
-}
-
-struct timespec
-tv_to_ts(unsigned long tv)
-{
-    return (struct timespec) {.tv_sec = tv / 1000, .tv_nsec = (tv % 1000) * 1000000};
-}
