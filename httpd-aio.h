@@ -51,7 +51,6 @@ struct async_io {
     int ac;
     int nc;
     int wait;
-    int ready;
     void *nlist;
     void *alist;
     void *thr;
