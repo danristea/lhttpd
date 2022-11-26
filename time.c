@@ -41,9 +41,23 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <mach/mach.h>
 #endif
 
+long
+ts_to_tv(struct timespec *ts)
+{
+    return (long)ts->tv_sec * 1000000000L + ts->tv_nsec;
+}
+
+struct timespec
+tv_to_ts(unsigned long tv)
+{
+    return (struct timespec) {.tv_sec = tv / 1000, .tv_nsec = (tv % 1000) * 1000000};
+}
+
 // Use clock_gettime in linux, clock_get_time in OS X.
 // courtesy of https://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
-void get_monotonic_time(struct timespec *ts){
+void
+get_monotonic_time(struct timespec *ts)
+{
 #ifdef __MACH__
     clock_serv_t cclock;
     mach_timespec_t mts;
@@ -79,7 +93,9 @@ parse_date(const char *val, time_t *timestamp)
 
 // Use clock_gettime in linux, clock_get_time in OS X.
 // courtesy of https://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
-void get_calendar_time(struct timespec *ts){
+void
+get_calendar_time(struct timespec *ts)
+{
 #ifdef __MACH__
     clock_serv_t cclock;
     mach_timespec_t mts;
@@ -93,7 +109,9 @@ void get_calendar_time(struct timespec *ts){
 #endif
 }
 
-double get_elapsed_time(struct timespec *before, struct timespec *after){
+double
+get_elapsed_time(struct timespec *before, struct timespec *after)
+{
     double deltat_s  = after->tv_sec - before->tv_sec;
     double deltat_ns = after->tv_nsec - before->tv_nsec;
     return deltat_s + deltat_ns*1e-9;
