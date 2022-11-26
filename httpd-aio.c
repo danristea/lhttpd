@@ -28,6 +28,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "httpd-aio.h"
 
+struct async_io **aio;
+
 /* linux */
 #ifdef  __linux__
 
@@ -213,10 +215,10 @@ lh_aio_schedule(struct async_io *aio, void *ctx)
     aio->wait = 1;
 
     rv = lio_listio(LIO_NOWAIT, rlist, aio->nc, &se);
-    
     if (rv != 0) {
+
         int x = 0;
-        aio->ac = 0;
+
         for (int i = 0; i < aio->nc; i++)  {
             rv = aio_error(&acb_l[i]);
 
