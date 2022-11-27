@@ -44,7 +44,7 @@ A minimal example:
 
     httpd = require 'httpd'
 
-    local function foo(env, header)
+    local function handler_fn(env, header)
         local head = {[":status"] = "200"}
         httpd.header(head)
 
@@ -56,7 +56,7 @@ A minimal example:
         end
     end
 
-    httpd.register_handler("/bar", foo)
+    httpd.register_handler("/handler", handler_fn)
 
  Additional examples can be found in the "examples" folder, which include upload, HTTP/2 server push, and more.
 
