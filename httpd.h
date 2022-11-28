@@ -216,7 +216,6 @@ typedef struct connection {
 
     long timestamp;
     struct thread* thr;
-
     struct stream *strm;
 
     int http_error;
@@ -256,7 +255,6 @@ typedef struct connection {
     unsigned char* ping_data;
 
     int h2_preface;
-    int hs;
     uint32_t h_sid;
 
     int not_found;
@@ -265,47 +263,37 @@ typedef struct connection {
     TAILQ_ENTRY(connection) link;
 } connection;
 
+//time.c
+char *httpd_time(char *, size_t);
 
 //log.c
-void log_init(char *progname, int dbg, int fg);
-void log_ex(struct server *srv, int priority, const char *fmt, ...);
-void log_dbg(int priority, const char *fmt, ...);
-
-//time.c
-void get_monotonic_time(struct timespec *ts);
-void get_calendar_time(struct timespec *ts);
-char* httpd_time(char *date, size_t datelen);
-double get_elapsed_time(struct timespec *before, struct timespec *after);
+void log_init(char *, int, int);
+void log_ex(struct server *, int, const char *, ...);
+void log_dbg(int, const char *, ...);
 
 //httpd-lua.c
-int lua_map_create(struct thread*, struct l_map*);
-static int register_handler(lua_State*);
-struct lua_handler* find_handler(struct lua_state_map*, char*, char*);
-void stack_dump(lua_State *L, const char *stackname);
-int lev_read(struct stream* strm, char* buf, int len);
-int lev_write(struct stream* strm, char* buf, int len);
+int lua_map_create(struct thread *, struct l_map *);
+static int register_handler(lua_State *);
+struct lua_handler *find_handler(struct lua_state_map *, char *, char *);
+int lev_read(struct stream *, char *, int);
+int lev_write(struct stream *, char *, int);
 int lua_run(lua_State *, lua_State *, int);
-void lh_aio_dispatch(struct aio_data *aio_d);
-
-// httpd-aio
-void thread_wakeup(struct edata *ev);
+void lh_aio_dispatch(struct aio_data *);
 
 //httpd.c
-char* e_strdup(const char* oldstr);
-void* serve(void *thread);
-int new_conn(struct thread* thr);
-void conntab_create(struct edata *ev);
-void conntab_remove(struct connection *conn);
-void conn_io(struct connection *conn);
-
-static long ts_to_tv(struct timespec* ts);
-struct timespec tv_to_ts(unsigned long tv);
+char *e_strdup(const char *);
+int new_conn(struct thread *);
+void conntab_create(struct edata *);
+void conntab_remove(struct connection *);
+void conn_io(struct connection *);
 
 // server.c
-void *get_in_addr(struct sockaddr *sa);
-unsigned short int get_in_port(struct sockaddr *sa);
-void init_run(struct server *srv);
-void cleanup(struct server *srv);
-void signal_shutdown(struct server *srv);
+void *serve(void *);
+void *get_in_addr(struct sockaddr *);
+unsigned short int get_in_port(struct sockaddr *);
+void init_run(struct server *);
+void cleanup(struct server *);
+void thread_wakeup(struct edata *);
+void signal_shutdown(struct server *);
 
 #endif
