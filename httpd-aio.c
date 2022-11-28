@@ -28,7 +28,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "httpd-aio.h"
 
-struct async_io **aio;
 
 /* linux */
 #ifdef  __linux__
