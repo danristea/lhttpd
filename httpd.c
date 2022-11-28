@@ -1,7 +1,7 @@
 /*
 BSD 2-Clause License
 
-Copyright (c) 2022, danristea
+Copyright (c) 2022, Daniel Ristea <daniel.ristea@outlook.com>
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
