@@ -178,7 +178,7 @@ init_run(struct server *srv)
         sigaction(SIGINT, &sigact, NULL);
     }
 
-    port = htons(strtol(cfg->port, (char **)NULL, 10));
+    port = htons(strtol((cfg->port ? cfg->port : "443"), (char **)NULL, 10));
 
     if (cfg->addr == NULL) {
         ((struct sockaddr_in *) &(srv->ss))->sin_addr.s_addr = INADDR_ANY;
